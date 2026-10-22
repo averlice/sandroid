@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sandroid</string>
+    <string name="settings_subtitle">Text-to-speech engine</string>
+
+    <string name="label_voice">Voice</string>
+    <string name="label_speed">Speed: %1$d%%</string>
+    <string name="label_pitch">Pitch: %1$+d semitones</string>
+    <string name="label_singing">Singing mode for Sam, Mike and Mary</string>
+
+    <string name="action_preview">Preview</string>
+    <string name="action_ok">OK</string>
+    <string name="action_cancel">Cancel</string>
+
+    <string name="preview_hint">Sandroid will speak with %1$s.</string>
+    <string name="preview_preparing">Preparing…</string>
+    <string name="preview_text">Hello from Sandroid on Android.</string>
+
+    <string name="error_open">Could not open %1$s. Its voice data is not installed.</string>
+    <string name="error_speak">Speech failed. Check the voice data.</string>
+</resources>

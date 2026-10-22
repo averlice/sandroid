@@ -88,6 +88,14 @@ The Makefile also builds each engine for the Mac with sanitizers and renders sam
 
 The build produces Sapple.app on iOS and macOS. Inside the code the project, its targets and the extension (ClassicVoicesExtension.appex) are still called ClassicVoices, and the bundle identifiers are unchanged.
 
+## Android (early port)
+
+The Android project is in `AndroidApp/` (kept separate from the Apple `App/` source folder) and is called Sandroid. It provides a system Text-to-Speech service plus a settings screen for picking the voice, speed and pitch. It targets Android 8 (API 26) and builds `arm64-v8a` and `x86_64` native libraries. The Microsoft Speech SDK natural voices are not included in this port yet.
+
+Open this repository's `sandroid` directory in Android Studio with the Android SDK, NDK, CMake 3.22.1, and a compatible Gradle installation. The Gradle build copies any staged data folders into the app assets; the app installs those assets into its private files directory on first use. Stage the same local, gitignored folders described above (`VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and generated `TruVoiceData/tvdata.s`). Build TruVoice tables first with `make truvoice-data`. Voice data and engine tables are not included in this repository.
+
+After installing Sandroid, open it (or tap the gear beside Sandroid in Android's text-to-speech settings) and choose the voice, speed and pitch; OK applies them to every app on the device. Only voices whose data was staged into the build are offered, so the list matches what can actually speak. The Android service synthesizes plain text through the native C engines; the iOS SSML segmentation and pause behavior has not been ported yet.
+
 ## Releasing
 
 One command builds and publishes a release: the IPA, the notarized Mac zip, the AltStore / SideStore source and the downloads page.
