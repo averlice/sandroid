@@ -66,7 +66,7 @@ AnnaVoice/      Anna: the eleven M1033DSK.* files from Windows 7            (mak
 OneCoreVoice/   Windows 10 / 11 OneCore voices and language data            (make onecore-data; the en-AU / en-CA ones:
                 tools/onecore_lof_stage.py, from the Windows 11 Languages and Optional Features image)
 NeuralVoices/   Windows 11 natural voice packages and their model key       (make neural-stage)
-NeuralSDK/      Microsoft's embedded Speech SDK libraries, ios/ and macos/  (make neural-stage)
+NeuralSDK/      Microsoft's embedded Speech SDK libraries, ios/, macos/ and android/  (make neural-stage)
 ```
 
 The make targets stage or check each folder against the SHA-256 lists in `tools/` and `SAPI4/tools/`, so you can tell whether your copy matches the one the engines were checked against.
