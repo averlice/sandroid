@@ -550,12 +550,16 @@ static char *ssml_for(const char *engine_name, const char *locale, const char *t
     pct = (pow(2.0, semitones / 12.0) - 1.0) * 100.0;
     /* Embedded voices take the voice from the configuration, not from SSML, so the Azure
      * packs are asked for with plain prosody; the Windows voices accept the name here. */
-    o += (size_t)snprintf(s + o, cap - o,
-                          "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='%s'>"
-                          "%s<prosody rate='%.3f' pitch='%+.1f%%'>",
-                          locale, with_voice ? "<voice name='" : "", speed, pct);
     if (with_voice) {
-        o += (size_t)snprintf(s + o, cap - o, "%s'>", engine_name);
+        o += (size_t)snprintf(s + o, cap - o,
+                              "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='%s'>"
+                              "<voice name='%s'><prosody rate='%.3f' pitch='%+.1f%%'>",
+                              locale, engine_name, speed, pct);
+    } else {
+        o += (size_t)snprintf(s + o, cap - o,
+                              "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='%s'>"
+                              "<prosody rate='%.3f' pitch='%+.1f%%'>",
+                              locale, speed, pct);
     }
     for (p = text; *p; p++) {
         const char *rep = NULL;
