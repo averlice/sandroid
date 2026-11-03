@@ -1,13 +1,12 @@
 package com.quinton.sandroid
 
+import android.media.AudioFormat
 import android.speech.tts.SynthesisCallback
 import android.speech.tts.SynthesisRequest
 import android.speech.tts.TextToSpeech
 import android.speech.tts.TextToSpeechService
 import android.speech.tts.Voice
-import android.media.AudioFormat
 import java.io.File
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.log2
 import kotlin.math.ln
@@ -21,6 +20,8 @@ class SandroidTtsService : TextToSpeechService() {
         VoiceCatalog.voices.filter { VoiceAssets.isAvailable(this, it.engine) }
     }
 
+    private fun prefs() = getSharedPreferences("settings", MODE_PRIVATE)
+
     override fun onGetLanguage(): Array<String> = arrayOf("eng", "USA", "")
 
     override fun onIsLanguageAvailable(language: String, country: String, variant: String): Int =
@@ -33,7 +34,7 @@ class SandroidTtsService : TextToSpeechService() {
 
     /** The voice picked in the Sandroid app (its settings screen), applied engine-wide. */
     private fun preferredVoice(): VoiceDef? {
-        val id = getSharedPreferences("settings", MODE_PRIVATE).getString("voice", null) ?: return null
+        val id = prefs().getString(MainActivity.KEY_VOICE, null) ?: return null
         val voice = VoiceCatalog.byNameOrLocale(id) ?: return null
         return if (voice in voices) voice else null
     }
@@ -57,12 +58,12 @@ class SandroidTtsService : TextToSpeechService() {
 
     override fun onSynthesizeText(request: SynthesisRequest, callback: SynthesisCallback) {
         var callbackFinished = false
-        fun fail(code: Int = TextToSpeech.ERROR) {
-            callback.error(code)
+        fun fail(notInstalled: Boolean = false) {
+            callback.error(if (notInstalled) TextToSpeech.ERROR_NOT_INSTALLED_YET else TextToSpeech.ERROR)
             callback.done()
             callbackFinished = true
         }
-        if (callback.start(22050, AudioFormat.ENCODING_PCM_16BIT, 1) != TextToSpeech.SUCCESS) {
+        if (callback.start(PreviewAudioOutput.RATE, AudioFormat.ENCODING_PCM_16BIT, 1) != TextToSpeech.SUCCESS) {
             fail()
             return
         }
@@ -73,43 +74,45 @@ class SandroidTtsService : TextToSpeechService() {
         val root = try { dataRoot ?: VoiceAssets.install(this).also { dataRoot = it } }
         catch (_: Exception) { fail(); return }
         val run = generation.get()
-        val handle = try { NativeEngine.open(root, selected) } catch (_: UnsatisfiedLinkError) { 0L }
+        SpeechDiagnostics.record(this, "TTS opening ${selected.name}")
+        val handle = try { NativeEngine.open(this, root, selected) }
+        catch (_: Exception) { 0L }
+        catch (_: UnsatisfiedLinkError) { 0L }
         if (handle == 0L) {
-            fail(TextToSpeech.ERROR_NOT_INSTALLED_YET)
+            fail(notInstalled = true)
             return
         }
         try {
-            val sink = object : PcmSink {
-                override fun onNativePcm(samples: ShortArray): Boolean {
-                    if (generation.get() != run) return false
-                    val bytes = ByteArray(samples.size * 2)
-                    samples.forEachIndexed { i, sample ->
-                        bytes[i * 2] = sample.toByte()
-                        bytes[i * 2 + 1] = (sample.toInt() ushr 8).toByte()
-                    }
-                    var offset = 0
-                    val maxBytes = callback.maxBufferSize.coerceAtLeast(2).let { it - (it % 2) }
-                    while (offset < bytes.size && generation.get() == run) {
-                        val count = minOf(maxBytes, bytes.size - offset)
-                        if (callback.audioAvailable(bytes, offset, count) != TextToSpeech.SUCCESS) return false
-                        offset += count
-                    }
-                    return generation.get() == run
+            val sink = PcmSink { samples ->
+                if (generation.get() != run) return@PcmSink false
+                val bytes = ByteArray(samples.size * 2)
+                samples.forEachIndexed { i, sample ->
+                    bytes[i * 2] = sample.toByte()
+                    bytes[i * 2 + 1] = (sample.toInt() ushr 8).toByte()
                 }
+                var offset = 0
+                val maxBytes = callback.maxBufferSize.coerceAtLeast(2).let { it - (it % 2) }
+                while (offset < bytes.size && generation.get() == run) {
+                    val count = minOf(maxBytes, bytes.size - offset)
+                    if (callback.audioAvailable(bytes, offset, count) != TextToSpeech.SUCCESS) return@PcmSink false
+                    offset += count
+                }
+                generation.get() == run
             }
             val rate = request.speechRate.coerceIn(10, 400) / 100.0
             val sapiRate = (10.0 * ln(rate) / ln(3.0)).coerceIn(-10.0, 18.0)
-            val prefPitch = getSharedPreferences("settings", MODE_PRIVATE).getInt("pitch", 0).toDouble()
+            val prefPitch = prefs().getInt(MainActivity.KEY_PITCH, 0).toDouble()
             val pitch = (12.0 * log2(request.pitch.coerceIn(10, 400) / 100.0) + prefPitch).coerceIn(-12.0, 12.0)
-            val singing = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("singing", false)
-            val rc = NativeEngine.speak(handle, request.charSequenceText.toString(), sapiRate, pitch, singing, sink)
-            if (generation.get() != run || rc == 1) {
+            val singing = prefs().getBoolean(MainActivity.KEY_SINGING, false)
+            val volume = prefs().getInt(PcmVolume.KEY, PcmVolume.DEFAULT_PERCENT)
+            SpeechDiagnostics.record(this, "TTS synthesizing ${selected.name}")
+            val rc = NativeEngine.speak(handle, request.charSequenceText.toString(), sapiRate, pitch, singing, volume, sink)
+            SpeechDiagnostics.record(this, "TTS ${selected.name}: synthesis returned $rc")
+            if (generation.get() != run || rc >= 0) {
                 callback.done()
                 callbackFinished = true
-            } else if (rc < 0) fail()
-            else {
-                callback.done()
-                callbackFinished = true
+            } else {
+                fail()
             }
         } catch (_: Exception) {
             if (!callbackFinished) fail()

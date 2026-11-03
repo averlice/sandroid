@@ -18,6 +18,7 @@ set(BRIDGES
     "${BRIDGE}/cvt_bridge.c"
     "${BRIDGE}/cva_bridge.c"
     "${BRIDGE}/cvo_bridge.c"
+    "${BRIDGE}/cvn_bridge.c"
     "${CMAKE_CURRENT_LIST_DIR}/sandroid_jni.c")
 
 set(TRUVOICE_TABLES "${ROOT}/TruVoiceData/tvdata.s")

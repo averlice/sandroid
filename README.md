@@ -90,11 +90,13 @@ The build produces Sapple.app on iOS and macOS. Inside the code the project, its
 
 ## Android (early port)
 
-The Android project is in `AndroidApp/` (kept separate from the Apple `App/` source folder) and is called Sandroid. It provides a system Text-to-Speech service plus a settings screen for picking the voice, speed and pitch. It targets Android 8 (API 26) and builds `arm64-v8a` and `x86_64` native libraries. The Microsoft Speech SDK natural voices are not included in this port yet.
+The Android project is in `AndroidApp/` (kept separate from the Apple `App/` source folder) and is called Sandroid. It puts the same voices on Android as a system Text-to-Speech engine, with a settings screen for the voice, speed, pitch and volume. It targets Android 8 (API 26) and builds `arm64-v8a`, `armeabi-v7a` and `x86_64` libraries, as one APK per ABI plus a universal one.
 
-Open this repository's `sandroid` directory in Android Studio with the Android SDK, NDK, CMake 3.22.1, and a compatible Gradle installation. The Gradle build copies any staged data folders into the app assets; the app installs those assets into its private files directory on first use. Stage the same local, gitignored folders described above (`VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and generated `TruVoiceData/tvdata.s`). Build TruVoice tables first with `make truvoice-data`. Voice data and engine tables are not included in this repository.
+Everything the Apple extension can speak, Sandroid can speak: SAPI 5 (Sam, Mike, Mary), SAPI 4, TruVoice, Anna, the OneCore voices, and the natural voices. The natural voices run on Microsoft's embedded Speech SDK for Android (the `.so` files in `NeuralSDK/android`, loaded at run time, nothing linked at build time): the Windows 11 Narrator models (Jenny, Aria, Guy, Sonia, Ryan, Neerja, Prabhat) and the Azure embedded packs (Jane and Sara), which need SDK 1.50 rather than the 1.33 the Apple builds use.
 
-After installing Sandroid, open it (or tap the gear beside Sandroid in Android's text-to-speech settings) and choose the voice, speed and pitch; OK applies them to every app on the device. Only voices whose data was staged into the build are offered, so the list matches what can actually speak. The Android service synthesizes plain text through the native C engines; the iOS SSML segmentation and pause behavior has not been ported yet.
+Open this repository's `sandroid` directory in Android Studio with the Android SDK, NDK, CMake 3.22.1, and a compatible Gradle installation. The Gradle build copies any staged data folders into the app assets and writes a SHA-256 manifest of them, so the app can unpack the data on first use and, after an update, only re-copy the files that actually changed (the neural models alone are well over 100 MB). Stage the same local, gitignored folders described above (`VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, `NeuralVoices` with the voice folders and `model.key`, and generated `TruVoiceData/tvdata.s`). Build TruVoice tables first with `make truvoice-data`. Voice data, engine tables and SDKs are not included in this repository.
+
+After installing Sandroid, open it (or tap the gear beside Sandroid in Android's text-to-speech settings) and choose the voice, speed, pitch and volume; OK applies them to every app on the device. Only voices whose data was staged into the build are offered, so the list matches what can actually speak. The Android service synthesizes plain text through the native C engines; the iOS SSML segmentation and pause behavior has not been ported yet. A voice that fails to open or speak puts the reason in logcat under `sandroid-neural` / `Sandroid`, and the settings screen can copy a diagnostics report.
 
 ## Releasing
 
@@ -129,8 +131,13 @@ tools/        data staging, hash checks, table and patch generators
 - Anna: engine from [ms-ana-decomp](https://github.com/KamiKitsune420/ms-ana-decomp) by KamiKitsune420. Voice data by Microsoft.
 - David, Zira, Mark, Hazel, George and Susan (OneCore): engine from [ms-david-zira-decomp](https://github.com/KamiKitsune420/ms-david-zira-decomp) by KamiKitsune420, plus Eva, Sarah, Matilda, and the Australian and Canadian voices Catherine, James, Linda and Richard, which I added. Voice data by Microsoft.
 - Jenny, Aria, Guy, Sonia and Ryan (Windows 11 natural voices), and Neerja and Prabhat (Indian English natural voices): these run on Microsoft's embedded Speech SDK. Voices and SDK by Microsoft.
+- Jane and Sara (Azure embedded neural voices): the offline voice packs Microsoft hands out for the embedded Speech SDK, unencrypted and licensed per pack. Voices and SDK by Microsoft.
 
 None of the voice data, original engine files or SDKs are in this repo, and this project doesn't license them. They belong to their owners. The pre-built downloads on quintonwilliams.me do bundle them, for personal use, and they will be removed if a rights holder asks.
+
+## Thanks
+
+Thanks to Zach Benton for his contribution to this project.
 
 ## License
 

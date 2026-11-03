@@ -7,13 +7,21 @@
 #include "cvt_bridge.h"
 #include "cva_bridge.h"
 #include "cvo_bridge.h"
+#include "cvn_bridge.h"
 
 typedef struct {
     int engine;
-    union { cv_voice *sapi5; cv4n_voice *sapi4; cvt_voice *truvoice; cva_voice *anna; cvo_voice *onecore; } v;
+    union {
+        cv_voice *sapi5;
+        cv4n_voice *sapi4;
+        cvt_voice *truvoice;
+        cva_voice *anna;
+        cvo_voice *onecore;
+        cvn_voice *neural;
+    } v;
 } VoiceHandle;
 
-enum { E_SAPI5, E_SAPI4, E_TRUVOICE, E_ANNA, E_ONECORE };
+enum { E_SAPI5, E_SAPI4, E_TRUVOICE, E_ANNA, E_ONECORE, E_NEURAL };
 
 static const char *utf(JNIEnv *env, jstring value) { return value ? (*env)->GetStringUTFChars(env, value, NULL) : ""; }
 static void unutf(JNIEnv *env, jstring value, const char *chars) { if (value && chars) (*env)->ReleaseStringUTFChars(env, value, chars); }
@@ -44,6 +52,27 @@ done:
     return (jlong)(intptr_t)h;
 }
 
+/* The neural voices keep their SDK configuration for the life of the process, so opening one
+ * is cheap after the first utterance; the voice name is what the Kotlin side calls dataName. */
+JNIEXPORT jlong JNICALL Java_com_quinton_sandroid_NativeEngine_nativeOpenNeural(
+    JNIEnv *env, jobject self, jstring sdkValue, jstring dataValue, jstring workValue, jstring voiceValue) {
+    (void)self;
+    const char *sdk = utf(env, sdkValue), *data = utf(env, dataValue), *work = utf(env, workValue), *voice = utf(env, voiceValue);
+    cvn_voice *v = cvn_voice_open_android(sdk, data, work, voice);
+    VoiceHandle *h = NULL;
+    if (v) {
+        h = calloc(1, sizeof(*h));
+        if (h) {
+            h->engine = E_NEURAL;
+            h->v.neural = v;
+        } else {
+            cvn_voice_close(v);
+        }
+    }
+    unutf(env, sdkValue, sdk); unutf(env, dataValue, data); unutf(env, workValue, work); unutf(env, voiceValue, voice);
+    return (jlong)(intptr_t)h;
+}
+
 static void close_voice(VoiceHandle *h) {
     if (!h) return;
     switch (h->engine) {
@@ -52,6 +81,7 @@ static void close_voice(VoiceHandle *h) {
         case E_TRUVOICE: cvt_voice_close(h->v.truvoice); break;
         case E_ANNA: cva_voice_close(h->v.anna); break;
         case E_ONECORE: cvo_voice_close(h->v.onecore); break;
+        case E_NEURAL: cvn_voice_close(h->v.neural); break;
     }
     free(h);
 }
@@ -119,6 +149,7 @@ JNIEXPORT jint JNICALL Java_com_quinton_sandroid_NativeEngine_nativeSpeak(
         case E_TRUVOICE: rc = cvt_voice_speak(h->v.truvoice, text, rate, pitch, 1, deliver_pcm, &ctx); break;
         case E_ANNA: rc = cva_voice_speak(h->v.anna, text, rate, pitch, 1, deliver_pcm, &ctx); break;
         case E_ONECORE: rc = cvo_voice_speak(h->v.onecore, text, rate, pitch, 1, deliver_pcm, &ctx); break;
+        case E_NEURAL: rc = cvn_voice_speak(h->v.neural, text, rate, pitch, 1, deliver_pcm, &ctx); break;
     }
 done:
     unutf(env, textValue, text);

@@ -3,19 +3,30 @@
     <string name="app_name">Sandroid</string>
     <string name="settings_subtitle">Text-to-speech engine</string>
 
+    <string name="label_engine">Engine</string>
     <string name="label_voice">Voice</string>
     <string name="label_speed">Speed: %1$d%%</string>
     <string name="label_pitch">Pitch: %1$+d semitones</string>
+    <string name="label_volume">Volume: %1$d%%</string>
     <string name="label_singing">Singing mode for Sam, Mike and Mary</string>
+    <string name="volume_control">Speech volume</string>
+    <string name="volume_hint">100% is normal volume. Raise it up to 200% to boost quieter speech.</string>
+
+    <string name="engine_neural">Natural voices</string>
+    <string name="engine_sapi5">SAPI 5</string>
+    <string name="engine_sapi4">SAPI 4</string>
+    <string name="engine_truvoice">TruVoice</string>
+    <string name="engine_onecore">OneCore</string>
 
     <string name="action_preview">Preview</string>
     <string name="action_ok">OK</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_copy_diagnostics">Copy diagnostics</string>
 
     <string name="preview_hint">Sandroid will speak with %1$s.</string>
     <string name="preview_preparing">Preparing…</string>
     <string name="preview_text">Hello from Sandroid on Android.</string>
-
     <string name="error_open">Could not open %1$s. Its voice data is not installed.</string>
     <string name="error_speak">Speech failed. Check the voice data.</string>
+    <string name="diagnostics_copied">Diagnostics copied. Paste them into your bug report.</string>
 </resources>
