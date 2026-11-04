@@ -1,3 +1,2 @@
-<tts-engine xmlns:android="http://schemas.android.com/apk/res/android">
-    <settingsActivity>com.quinton.sandroid.MainActivity</settingsActivity>
-</tts-engine>
+<tts-engine xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.quinton.sandroid.MainActivity" />

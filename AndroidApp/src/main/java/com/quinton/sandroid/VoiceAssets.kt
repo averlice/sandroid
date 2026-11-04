@@ -1,10 +1,13 @@
 package com.quinton.sandroid
 
 import android.content.Context
+import android.util.AtomicFile
 import java.io.File
+import java.security.DigestInputStream
+import java.security.MessageDigest
 
 internal object VoiceAssets {
-    private val folders = listOf("VoiceData", "SAPI4Voices", "AnnaVoice", "OneCoreVoice", "TruVoiceData")
+    private var verifiedRoot: File? = null
 
     fun folderFor(engine: Engine): String = when (engine) {
         Engine.SAPI5 -> "VoiceData"
@@ -12,6 +15,7 @@ internal object VoiceAssets {
         Engine.ANNA -> "AnnaVoice"
         Engine.ONECORE -> "OneCoreVoice"
         Engine.TRUVOICE -> "TruVoiceData"
+        Engine.NEURAL -> "NeuralVoices"
     }
 
     /**
@@ -26,23 +30,47 @@ internal object VoiceAssets {
     @Synchronized
     fun install(context: Context): File {
         val root = File(context.filesDir, "voice-data")
-        root.mkdirs()
-        folders.forEach { folder -> copyAssetTree(context, folder, File(root, folder)) }
+        if (verifiedRoot == root && root.isDirectory) return root
+        check(root.isDirectory || root.mkdirs()) { "Cannot create voice-data folder" }
+        val entries = context.assets.open("voice-assets.sha256").bufferedReader().use { it.readLines() }
+        entries.filter { it.isNotBlank() }.forEach { line ->
+            val fields = line.split('\t', limit = 3)
+            check(fields.size == 3) { "Invalid voice-data manifest" }
+            val size = fields[0].toLong()
+            val hash = fields[1]
+            val path = fields[2]
+            check(!path.startsWith('/') && path.split('/').none { it == ".." }) { "Invalid voice-data path" }
+            val target = File(root, path)
+            // Verify existing installations too: older builds could leave nonempty partial files.
+            val valid = target.isFile && target.length() == size && runCatching {
+                val digest = MessageDigest.getInstance("SHA-256")
+                DigestInputStream(target.inputStream(), digest).use { input ->
+                    val buffer = ByteArray(65536)
+                    while (input.read(buffer) != -1) { /* hash without retaining the data */ }
+                }
+                hex(digest.digest()) == hash
+            }.getOrDefault(false)
+            if (!valid) installFile(context, path, target, size, hash)
+        }
+        verifiedRoot = root
         return root
     }
 
-    private fun copyAssetTree(context: Context, assetPath: String, target: File) {
-        val entries: Array<String> = try { context.assets.list(assetPath) ?: emptyArray() } catch (_: Exception) { emptyArray() }
-        if (entries.isEmpty()) return
-        target.mkdirs()
-        entries.forEach { entry ->
-            val childAsset = "$assetPath/$entry"
-            val child = File(target, entry)
-            val children: Array<String> = try { context.assets.list(childAsset) ?: emptyArray() } catch (_: Exception) { emptyArray() }
-            if (children.isNotEmpty()) copyAssetTree(context, childAsset, child)
-            else if (!child.exists() || child.length() == 0L) {
-                runCatching { context.assets.open(childAsset).use { input -> child.outputStream().use { output -> input.copyTo(output) } } }
+    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
+
+    private fun installFile(context: Context, path: String, target: File, size: Long, hash: String) {
+        val atomic = AtomicFile(target)
+        val output = atomic.startWrite()
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val count = context.assets.open(path).use { input ->
+                DigestInputStream(input, digest).use { it.copyTo(output) }
             }
+            check(count == size && hex(digest.digest()) == hash) { "Incomplete voice data: $path" }
+            atomic.finishWrite(output)
+        } catch (error: Exception) {
+            atomic.failWrite(output)
+            throw IllegalStateException("Cannot install voice data: $path (${error.message})", error)
         }
     }
 }

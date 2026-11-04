@@ -57,8 +57,8 @@ class SandroidTtsService : TextToSpeechService() {
 
     override fun onSynthesizeText(request: SynthesisRequest, callback: SynthesisCallback) {
         var callbackFinished = false
-        fun fail(code: Int = TextToSpeech.ERROR) {
-            callback.error(code)
+        fun fail(notInstalled: Boolean = false) {
+            callback.error(if (notInstalled) TextToSpeech.ERROR_NOT_INSTALLED_YET else TextToSpeech.ERROR_SYNTHESIS)
             callback.done()
             callbackFinished = true
         }
@@ -73,9 +73,12 @@ class SandroidTtsService : TextToSpeechService() {
         val root = try { dataRoot ?: VoiceAssets.install(this).also { dataRoot = it } }
         catch (_: Exception) { fail(); return }
         val run = generation.get()
-        val handle = try { NativeEngine.open(root, selected) } catch (_: UnsatisfiedLinkError) { 0L }
+        SpeechDiagnostics.record(this, "TTS opening ${selected.name}")
+        val handle = try { NativeEngine.open(this, root, selected) }
+        catch (_: UnsatisfiedLinkError) { 0L }
+        catch (_: Exception) { 0L }
         if (handle == 0L) {
-            fail(TextToSpeech.ERROR_NOT_INSTALLED_YET)
+            fail(notInstalled = true)
             return
         }
         try {
@@ -102,7 +105,12 @@ class SandroidTtsService : TextToSpeechService() {
             val prefPitch = getSharedPreferences("settings", MODE_PRIVATE).getInt("pitch", 0).toDouble()
             val pitch = (12.0 * log2(request.pitch.coerceIn(10, 400) / 100.0) + prefPitch).coerceIn(-12.0, 12.0)
             val singing = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("singing", false)
-            val rc = NativeEngine.speak(handle, request.charSequenceText.toString(), sapiRate, pitch, singing, sink)
+            val volume = getSharedPreferences("settings", MODE_PRIVATE)
+                .getInt(PcmVolume.KEY, PcmVolume.DEFAULT_PERCENT)
+            SpeechDiagnostics.record(this, "TTS synthesizing ${selected.name}")
+            val rc = NativeEngine.speak(handle, request.charSequenceText.toString(), sapiRate, pitch, singing,
+                volumePercent = volume, sink = sink)
+            SpeechDiagnostics.record(this, "TTS ${selected.name}: synthesis returned $rc")
             if (generation.get() != run || rc == 1) {
                 callback.done()
                 callbackFinished = true

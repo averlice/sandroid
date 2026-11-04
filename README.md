@@ -90,11 +90,68 @@ The build produces Sapple.app on iOS and macOS. Inside the code the project, its
 
 ## Android (early port)
 
-The Android project is in `AndroidApp/` (kept separate from the Apple `App/` source folder) and is called Sandroid. It provides a system Text-to-Speech service plus a settings screen for picking the voice, speed and pitch. It targets Android 8 (API 26) and builds `arm64-v8a` and `x86_64` native libraries. The Microsoft Speech SDK natural voices are not included in this port yet.
+The Android project is in `AndroidApp/` (kept separate from the Apple `App/` source folder) and is called Sandroid. It provides a system Text-to-Speech service plus a settings screen for picking the voice, speed and pitch. It targets Android 8 (API 26) and builds `armeabi-v7a` (ARM32), `arm64-v8a` (ARM64), and `x86_64` native libraries. Experimental offline natural voices use Microsoft's Android embedded Speech SDK 1.33.0: Jenny, Aria, Guy, Sonia, Ryan, Neerja, and Prabhat. The SDK's four required native libraries are packaged for every selected ABI, including ARM32.
 
-Open this repository's `sandroid` directory in Android Studio with the Android SDK, NDK, CMake 3.22.1, and a compatible Gradle installation. The Gradle build copies any staged data folders into the app assets; the app installs those assets into its private files directory on first use. Stage the same local, gitignored folders described above (`VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and generated `TruVoiceData/tvdata.s`). Build TruVoice tables first with `make truvoice-data`. Voice data and engine tables are not included in this repository.
+Open this repository's `sandroid` directory in Android Studio with JDK 17, Android SDK platform 35, Build Tools 34.0.0, NDK 27.2.12479018, and CMake 3.22.1. The included Gradle wrapper downloads Gradle 8.7; a separate Gradle installation is not required. The Gradle build copies any staged data folders into the app assets; the app installs those assets into its private files directory on first use. Stage the same local, gitignored folders described above (`VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and generated `TruVoiceData/tvdata.s`). Voice data and engine tables are not included in this repository. Without TruVoice tables, the Android build uses a non-speaking TruVoice placeholder; the other engines can still use their staged voice data.
 
-After installing Sandroid, open it (or tap the gear beside Sandroid in Android's text-to-speech settings) and choose the voice, speed and pitch; OK applies them to every app on the device. Only voices whose data was staged into the build are offered, so the list matches what can actually speak. The Android service synthesizes plain text through the native C engines; the iOS SSML segmentation and pause behavior has not been ported yet.
+For a command-line debug build, set `JAVA_HOME` to your JDK 17 installation and `ANDROID_HOME` to your Android SDK directory (or set `sdk.dir` in a local, gitignored `local.properties` file), then run:
+
+```sh
+./gradlew :androidApp:assembleDebug
+```
+
+The installable, debug-signed APK is `AndroidApp/build/outputs/apk/debug/androidApp-debug.apk`. The default build is universal: Android 8 and later on ARM32, ARM64, and x86-64 devices. No release signing key is needed for this debug build. A build without any staged voice data will have no usable voices.
+
+Use the build script to create named APKs in the root `build/` folder:
+
+```sh
+./tools/build-android.sh arm32      # armeabi-v7a only
+./tools/build-android.sh arm64      # arm64-v8a only
+./tools/build-android.sh universal  # ARM32 + ARM64 + x86-64 (also the default)
+./tools/build-android.sh all        # produce all three APKs
+```
+
+Outputs are named `build/Sandroid-<versionName>-<target>.apk`. These commands use the same debug signing key as previous test builds, so they can update those installations. The script finds Homebrew's JDK 17 on macOS when `JAVA_HOME` isn't set. The SDK/NDK and staged voice data requirements above still apply. All variants include the same voice assets; choosing one ABI reduces native-library size. Use the universal APK when unsure which architecture a device's Android installation supports. For example, an ARM64 processor can run a 32-bit Android installation; the Android ABI matters more than the processor specification. Check a connected device with `adb shell getprop ro.product.cpu.abilist`.
+
+The APK includes a size/SHA-256 manifest for its staged voice files. On the first speech request in each app process, the installer verifies existing files and atomically replaces missing, incomplete, outdated, or corrupted copies from the APK. This also repairs partial nonempty files left by older builds without uninstalling or clearing settings. Copy failures are reported rather than silently retaining unusable data. Subsequent requests reuse the verified installation in that process.
+
+For direct Gradle builds, select ABIs with `-PsandroidAbis=armeabi-v7a`, `-PsandroidAbis=arm64-v8a`, or a comma-separated combination. Omitting the property builds all three supported ABIs. Architecture-specific APKs are intended for direct installation; use the universal build when both ARM widths are needed. ARM32 builds still require testing on a physical 32-bit device; the existing ARM64 emulator results below do not establish ARM32 runtime compatibility.
+
+For a remote speech failure, reproduce it using Preview, reopen Sandroid if it closes, and press **Copy diagnostics**. Paste the report into the bug report. It includes the app/process architecture, the last speech operation, memory availability, and recent process exit reasons. On Android 12 and later, available native crash tombstones are decoded into the signal and crashing thread's backtrace. Reports are collected locally and copied only when the button is pressed. No speech text is recorded.
+
+The instrumentation runner also accepts `-e oneCoreOnly true` to check PCM from all thirteen OneCore voices plus Eva cancellation and recovery, using the actual installed app ABI:
+
+```sh
+./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest -PsandroidAbis=armeabi-v7a
+adb install -r AndroidApp/build/outputs/apk/debug/androidApp-debug.apk
+adb install -r AndroidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
+adb shell am instrument -w -e oneCoreOnly true com.quinton.sandroid.test/com.quinton.sandroid.NaturalVoiceInstrumentation
+```
+
+If you have the supported Sapple Mac app, its resource folders can supply `VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and `NeuralVoices`. Look inside `Contents/PlugIns/ClassicVoicesExtension.appex/Contents/Resources/`. Copy each entire folder to the repository root, including `NeuralVoices/model.key`; natural voices also need the shared files in `OneCoreVoice`. Gradle downloads the Android SDK from Maven Central and packages its core, embedded TTS, TTS runtime, and ONNX runtime libraries. The Java/cloud API and telemetry library are not packaged, and the app has no internet permission. The Mac SDK dylibs are not used on Android.
+
+TruVoice's tables are embedded in the Mac executables rather than a resource folder. With `Sapple.app` copied into the repository, recover them using `python3 tools/truvoice_from_sapple.py Sapple.app`, then rebuild the APK. This script requires matching table bytes and symbol offsets in the app and extension and rejects unsupported data images. The recovered assembly preserves the data layout but has different text from the upstream assembly checked by `make truvoice-data`. The copied app and recovered voice data are gitignored.
+
+The natural-voice build passed tests on an Android 15 ARM64 emulator with 4 KB memory pages: all seven voices produced nonzero PCM, canceled speech and spoke again, and Android's TTS service registered the voices as offline and synthesized a WAV. Physical Pixel testing is still required. SDK 1.33's libraries have 4 KB ELF alignment and do not provide native 16 KB page-size support. Our own native library is aligned for 16 KB pages. SDK 1.44.0 and 1.52.0 have newer page-size support but canceled synthesis with these models in emulator tests; changing SDK versions is not a verified fix for these voice packages. An alternative SDK can be selected for experiments with `-PembeddedSpeechVersion=1.52.0`.
+
+To repeat the natural-voice smoke test on a connected test device:
+
+```sh
+./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest
+adb install -r AndroidApp/build/outputs/apk/debug/androidApp-debug.apk
+adb install -r AndroidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
+adb shell am instrument -w com.quinton.sandroid.test/com.quinton.sandroid.NaturalVoiceInstrumentation
+```
+
+The runner prints a `FAILED` message on an assertion failure, or a `Process crashed` result for a native crash; check its output rather than relying solely on adb's exit status. Use `adb shell getconf PAGE_SIZE` to check the device's memory page size.
+
+After installing Sandroid, open it (or tap the gear beside Sandroid in Android's text-to-speech settings). Choose an engine first, then a voice from that engine's filtered list, and set the speed, pitch and volume; OK applies them to every app on the device. Anna appears under SAPI 5 and keeps its own synthesis backend and voice data. Volume ranges from 0% (mute) to 200%, with 100% preserving the original audio; the same gain applies to previews and system speech for every voice. Boosted peaks are capped to the PCM range and can distort at high settings. Reopening settings restores the engine for the saved voice. Switching engines remembers each engine's last selected voice while the screen is open, and Cancel leaves the saved settings unchanged. Only voices whose data was staged into the build are offered, so the list matches what can actually speak. The Android service synthesizes plain text through the native C engines; the iOS SSML segmentation and pause behavior has not been ported yet.
+
+To check Anna grouping and selection restoration, volume defaults and save/cancel behavior, PCM gain limits, and saved volume in system speech, run the instrumentation command above with `-e settingsOnly true` before the component name. This test requires staged Anna data and at least one other voice group, and restores the saved settings afterward.
+
+Engine and voice pickers open in separate scrollable dialogs so earlier voices remain reachable when reopening on the final selection. The settings page scrolls independently, with system-bar padding on its viewport. To test touch scrolling from the last voice to the first and back in every available group, plus reaching the top and bottom of settings, run the instrumentation command with `-e scrollingOnly true`. Repeat with a small display and larger system font to check constrained layouts.
+
+Preview playback waits for all queued audio frames before releasing the output track, including a silent tail buffer for short clips and the output pipeline. Starting another preview or leaving the screen cancels playback immediately; the playback worker owns releasing its track. To check short and buffered playback completion and cancellation on a test device, build/install both APKs as above and run the instrumentation command with `-e previewOnly true` before the component name.
 
 ## Releasing
 

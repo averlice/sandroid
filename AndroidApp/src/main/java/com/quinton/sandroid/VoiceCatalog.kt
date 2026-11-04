@@ -3,7 +3,12 @@ package com.quinton.sandroid
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 
-enum class Engine { SAPI5, SAPI4, TRUVOICE, ANNA, ONECORE }
+enum class Engine {
+    SAPI5, SAPI4, TRUVOICE, ANNA, ONECORE, NEURAL;
+
+    /** Settings group only; native dispatch and asset availability still use the real engine. */
+    val settingsGroup: Engine get() = if (this == ANNA) SAPI5 else this
+}
 
 data class VoiceDef(
     val id: String, val name: String, val engine: Engine, val language: String = "en-US",
@@ -12,7 +17,8 @@ data class VoiceDef(
 ) {
     fun locale(): Locale = Locale.forLanguageTag(language)
     fun androidVoice(): android.speech.tts.Voice = android.speech.tts.Voice(
-        name, locale(), android.speech.tts.Voice.QUALITY_NORMAL,
+        name, locale(), if (engine == Engine.NEURAL) android.speech.tts.Voice.QUALITY_VERY_HIGH
+            else android.speech.tts.Voice.QUALITY_NORMAL,
         android.speech.tts.Voice.LATENCY_NORMAL, false, mutableSetOf()
     )
 }
@@ -24,6 +30,14 @@ object VoiceCatalog {
         VoiceDef("truvoice_$id", name, Engine.TRUVOICE, dataName = "$mode, American English (TruVoice)", female = female)
 
     val voices: List<VoiceDef> = buildList {
+        listOf(
+            Triple("Jenny", "en-US", true), Triple("Aria", "en-US", true), Triple("Guy", "en-US", false),
+            Triple("Sonia", "en-GB", true), Triple("Ryan", "en-GB", false),
+            Triple("Neerja", "en-IN", true), Triple("Prabhat", "en-IN", false)
+        ).forEach { (name, locale, female) ->
+            add(VoiceDef("neural_${name.lowercase()}", "$name (Natural)", Engine.NEURAL,
+                locale, name, female = female))
+        }
         addAll(listOf(
             VoiceDef("sam", "Sam (SAPI 5)", Engine.SAPI5, "en-US", "Sam"),
             VoiceDef("mike", "Mike (SAPI 5)", Engine.SAPI5, "en-US", "Mike"),

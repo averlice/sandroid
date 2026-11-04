@@ -11,6 +11,7 @@ OneCoreVoice/
 TruVoiceData/
 NeuralVoices/
 NeuralSDK/
+Sapple.app/
 _installers/
 
 # Microsoft SAPI 5 voice data (Sam, Mike, Mary)
@@ -101,6 +102,7 @@ ClassicVoices.xcodeproj/
 
 # Android Studio / Gradle / Android NDK
 .gradle/
+.kotlin/
 .idea/
 local.properties
 AndroidApp/build/

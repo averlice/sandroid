@@ -2,18 +2,22 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <limits.h>
+#include <android/log.h>
 #include "cv_bridge.h"
 #include "cv4n_bridge.h"
 #include "cvt_bridge.h"
 #include "cva_bridge.h"
 #include "cvo_bridge.h"
+#include "cvn_bridge.h"
 
 typedef struct {
     int engine;
-    union { cv_voice *sapi5; cv4n_voice *sapi4; cvt_voice *truvoice; cva_voice *anna; cvo_voice *onecore; } v;
+    union { cv_voice *sapi5; cv4n_voice *sapi4; cvt_voice *truvoice; cva_voice *anna; cvo_voice *onecore; cvn_voice *neural; } v;
 } VoiceHandle;
 
-enum { E_SAPI5, E_SAPI4, E_TRUVOICE, E_ANNA, E_ONECORE };
+enum { E_SAPI5, E_SAPI4, E_TRUVOICE, E_ANNA, E_ONECORE, E_NEURAL };
 
 static const char *utf(JNIEnv *env, jstring value) { return value ? (*env)->GetStringUTFChars(env, value, NULL) : ""; }
 static void unutf(JNIEnv *env, jstring value, const char *chars) { if (value && chars) (*env)->ReleaseStringUTFChars(env, value, chars); }
@@ -41,6 +45,35 @@ JNIEXPORT jlong JNICALL Java_com_quinton_sandroid_NativeEngine_nativeOpen(
     if (h && !(h->v.sapi5 || h->v.sapi4 || h->v.truvoice || h->v.anna || h->v.onecore)) { free(h); h = NULL; }
 done:
     unutf(env, rootValue, root); unutf(env, dataValue, data); unutf(env, effectValue, effect); unutf(env, emotionValue, emotion);
+    if (!h) {
+        const char *message = *err ? err : "Cannot allocate voice";
+        __android_log_print(ANDROID_LOG_ERROR, "Sandroid", "Engine %d open failed: %s", engine, message);
+        jclass cls = (*env)->FindClass(env, "java/lang/IllegalStateException");
+        if (cls) (*env)->ThrowNew(env, cls, message);
+    }
+    return (jlong)(intptr_t)h;
+}
+
+JNIEXPORT jlong JNICALL Java_com_quinton_sandroid_NativeEngine_nativeOpenNeural(
+    JNIEnv *env, jobject self, jstring sdkValue, jstring rootValue, jstring workValue, jstring voiceValue) {
+    (void)self;
+    const char *sdk = utf(env, sdkValue), *root = utf(env, rootValue);
+    const char *work = utf(env, workValue), *voice = utf(env, voiceValue);
+    char data[PATH_MAX], onecore[PATH_MAX], err[512] = {0};
+    snprintf(data, sizeof data, "%s/NeuralVoices", root);
+    snprintf(onecore, sizeof onecore, "%s/OneCoreVoice", root);
+    VoiceHandle *h = calloc(1, sizeof(*h));
+    if (h) {
+        h->engine = E_NEURAL;
+        h->v.neural = cvn_voice_open(sdk, data, onecore, work, voice, err, sizeof err);
+        if (!h->v.neural) { free(h); h = NULL; }
+    }
+    unutf(env, sdkValue, sdk); unutf(env, rootValue, root);
+    unutf(env, workValue, work); unutf(env, voiceValue, voice);
+    if (!h) {
+        jclass cls = (*env)->FindClass(env, "java/lang/IllegalStateException");
+        if (cls) (*env)->ThrowNew(env, cls, *err ? err : "Cannot allocate natural voice");
+    }
     return (jlong)(intptr_t)h;
 }
 
@@ -52,6 +85,7 @@ static void close_voice(VoiceHandle *h) {
         case E_TRUVOICE: cvt_voice_close(h->v.truvoice); break;
         case E_ANNA: cva_voice_close(h->v.anna); break;
         case E_ONECORE: cvo_voice_close(h->v.onecore); break;
+        case E_NEURAL: cvn_voice_close(h->v.neural); break;
     }
     free(h);
 }
@@ -119,8 +153,14 @@ JNIEXPORT jint JNICALL Java_com_quinton_sandroid_NativeEngine_nativeSpeak(
         case E_TRUVOICE: rc = cvt_voice_speak(h->v.truvoice, text, rate, pitch, 1, deliver_pcm, &ctx); break;
         case E_ANNA: rc = cva_voice_speak(h->v.anna, text, rate, pitch, 1, deliver_pcm, &ctx); break;
         case E_ONECORE: rc = cvo_voice_speak(h->v.onecore, text, rate, pitch, 1, deliver_pcm, &ctx); break;
+        case E_NEURAL: rc = cvn_voice_speak(h->v.neural, text, rate, pitch, 1, deliver_pcm, &ctx); break;
     }
 done:
     unutf(env, textValue, text);
+    if (rc < 0 && h->engine == E_NEURAL && !(*env)->ExceptionCheck(env)) {
+        jclass cls = (*env)->FindClass(env, "java/lang/IllegalStateException");
+        const char *error = cvn_last_error();
+        if (cls) (*env)->ThrowNew(env, cls, *error ? error : "Natural voice synthesis failed");
+    }
     return rc;
 }

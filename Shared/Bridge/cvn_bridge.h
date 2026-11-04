@@ -44,6 +44,8 @@ int cvn_voice_sample_rate(const cvn_voice *v); /* 22050 */
  * other threads wait for the process-wide lock. */
 int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double semitones, int trim, cv_pcm_fn fn,
                     void *user);
+/* Last synthesis failure on the calling thread; never contains the submitted text or model key. */
+const char *cvn_last_error(void);
 
 /* The speed a SAPI rate really gets, relative to the voice's natural speed: 3^(rate/10), 1/3 .. 3 (rates above 10 = 3). */
 double cvn_speed_factor(double sapi_rate);

@@ -86,6 +86,16 @@ static const nv_link ONECORE_EN_GB[] = {
 
 /* ---- process-wide state: one engine ---- */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local char g_error[256];
+
+const char *cvn_last_error(void) { return g_error; }
+
+static int sdk_failed(SPXHR code, const char *operation)
+{
+    if (!code) return 0;
+    snprintf(g_error, sizeof g_error, "%s failed (SDK code 0x%zx)", operation, (size_t)code);
+    return 1;
+}
 static struct {
     void *dl;
     fn_h cfg_create;
@@ -148,7 +158,11 @@ static int load_sdk(const char *sdk_dir, char *err, size_t errlen)
     char path[PATH_MAX];
     void *dl;
     if (G.dl) return 0;
+#ifdef __ANDROID__
+    snprintf(path, sizeof path, "%s/libMicrosoft.CognitiveServices.Speech.core.so", sdk_dir ? sdk_dir : "");
+#else
     snprintf(path, sizeof path, "%s/libMicrosoft.CognitiveServices.Speech.core.dylib", sdk_dir ? sdk_dir : "");
+#endif
     dl = dlopen(path, RTLD_NOW | RTLD_GLOBAL); /* the extension dylibs find the core's symbols through it */
     if (!dl) {
         seterr(err, errlen, "cannot load the speech engine: %s", dlerror());
@@ -320,16 +334,22 @@ static SPXH synth_for(int i)
 {
     SPXH bag = SPX_INVALID, cfg = SPX_INVALID, syn = SPX_INVALID;
     if (G.synth[i]) return G.synth[i];
-    if (G.cfg_create(&cfg)) return NULL;
+    if (sdk_failed(G.cfg_create(&cfg), "Create embedded configuration")) return NULL;
     G.config[i] = cfg;
-    if (G.cfg_add_path(cfg, G.work[i]) || G.cfg_set_format(cfg, FMT_RAW_24K_16BIT_MONO) || G.cfg_get_bag(cfg, &bag)) {
+    if (sdk_failed(G.cfg_add_path(cfg, G.work[i]), "Set voice path") ||
+        sdk_failed(G.cfg_set_format(cfg, FMT_RAW_24K_16BIT_MONO), "Set PCM format") ||
+        sdk_failed(G.cfg_get_bag(cfg, &bag), "Get voice properties")) {
         drop_voice(i);
         return NULL;
     }
-    G.bag_set(bag, PROP_SYNTH_OFFLINE_VOICE, NULL, VOICES[i].engine_name);
-    G.bag_set(bag, PROP_SYNTH_MODEL_KEY, NULL, G.key);
+    if (sdk_failed(G.bag_set(bag, PROP_SYNTH_OFFLINE_VOICE, NULL, VOICES[i].engine_name), "Select natural voice") ||
+        sdk_failed(G.bag_set(bag, PROP_SYNTH_MODEL_KEY, NULL, G.key), "Set model key")) {
+        G.bag_release(bag);
+        drop_voice(i);
+        return NULL;
+    }
     G.bag_release(bag);
-    if (G.synth_create(&syn, cfg, SPX_INVALID)) { /* no audio output: the audio comes back to us */
+    if (sdk_failed(G.synth_create(&syn, cfg, SPX_INVALID), "Create offline synthesizer")) {
         drop_voice(i);
         return NULL;
     }
@@ -434,6 +454,7 @@ int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double sem
     size_t have = 0;
     int rc = 0, stopped = 0, status = 0;
     if (!v || !utf8 || !fn) return -1;
+    g_error[0] = 0;
     clean = cv_sanitize_alloc(utf8);
     if (!clean) return -1;
     for (p = clean; *p == ' '; p++) {}
@@ -453,7 +474,8 @@ int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double sem
     ssml = syn ? ssml_for(VOICES[v->index].engine_name, VOICES[v->index].locale, clean, cvn_speed_factor(sapi_rate),
                           semitones)
                : NULL;
-    if (!ssml || G.start_ssml(syn, ssml, (uint32_t)strlen(ssml), &res) || G.ds_create(&ds, res)) {
+    if (!ssml || sdk_failed(G.start_ssml(syn, ssml, (uint32_t)strlen(ssml), &res), "Start offline speech") ||
+        sdk_failed(G.ds_create(&ds, res), "Open PCM stream")) {
         rc = -1;
         goto out;
     }
@@ -461,7 +483,11 @@ int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double sem
     for (;;) {
         uint32_t got = 0;
         size_t samples, no;
-        if (G.ds_read(ds, buf + have, (uint32_t)(sizeof buf - 1 - have), &got) || got == 0) break;
+        if (sdk_failed(G.ds_read(ds, buf + have, (uint32_t)(sizeof buf - 1 - have), &got), "Read PCM stream")) {
+            rc = -1;
+            break;
+        }
+        if (got == 0) break;
         have += got;
         samples = have / 2;
         if (samples) {
@@ -489,6 +515,7 @@ int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double sem
         size_t no;
         if (G.ds_status(ds, &status) == 0 && status == STREAM_CANCELED) {
             rc = -1; /* the engine gave up (the text, or a broken voice): whatever came is kept */
+            snprintf(g_error, sizeof g_error, "Offline speech canceled by SDK; check voice model/runtime compatibility");
         }
         no = cv_rs_run(&v->rs, 1);
         if (no && cv_trimmer_feed(t, v->rs.out, no)) rc = 1;

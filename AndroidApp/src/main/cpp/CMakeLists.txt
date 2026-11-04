@@ -18,10 +18,13 @@ set(BRIDGES
     "${BRIDGE}/cvt_bridge.c"
     "${BRIDGE}/cva_bridge.c"
     "${BRIDGE}/cvo_bridge.c"
+    "${BRIDGE}/cvn_bridge.c"
     "${CMAKE_CURRENT_LIST_DIR}/sandroid_jni.c")
 
-set(TRUVOICE_TABLES "${ROOT}/TruVoiceData/tvdata.s")
-if(EXISTS "${TRUVOICE_TABLES}")
+# Track adding/removing the optional tables so a previously configured build
+# switches between the real engine and placeholder without clearing its cache.
+file(GLOB TRUVOICE_TABLES CONFIGURE_DEPENDS "${ROOT}/TruVoiceData/tvdata.s")
+if(TRUVOICE_TABLES)
     list(APPEND BRIDGES "${TRUVOICE_TABLES}")
     set(TRUVOICE_SOURCES ${OPENTV} "${BRIDGE}/cvt_bridge.c")
 else()
@@ -45,4 +48,5 @@ target_compile_options(sandroid PRIVATE
     $<$<COMPILE_LANGUAGE:C>:-fwrapv>
     $<$<COMPILE_LANGUAGE:C>:-fno-strict-aliasing>
     $<$<COMPILE_LANGUAGE:C>:-Wno-unused-parameter>)
-target_link_libraries(sandroid log m)
+target_link_options(sandroid PRIVATE "-Wl,-z,max-page-size=16384")
+target_link_libraries(sandroid log m dl)
