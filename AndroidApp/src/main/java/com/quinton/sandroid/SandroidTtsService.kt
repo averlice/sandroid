@@ -18,7 +18,7 @@ class SandroidTtsService : TextToSpeechService() {
 
     /** Only the voices whose data was staged into the build; the rest would open and fail. */
     private val voices: List<VoiceDef> by lazy {
-        VoiceCatalog.voices.filter { VoiceAssets.isAvailable(this, it.engine) }
+        VoiceCatalog.voices.filter { VoiceAssets.isAvailable(this, it) }
     }
 
     override fun onGetLanguage(): Array<String> = arrayOf("eng", "USA", "")

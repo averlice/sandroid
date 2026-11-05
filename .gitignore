@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------------------------------------------
-# VOICE DATA, ENGINE BINARIES AND SDKs: never commit, never redistribute. They belong to their owners (see NOTICE)
+# VOICE DATA, ENGINE BINARIES AND SDKs: never commit to this repository. They belong to their owners (see NOTICE)
 # and each user supplies their own copies. Everything below is ignored on purpose; do not force-add any of it.
 # ---------------------------------------------------------------------------------------------------------------
 
@@ -113,3 +113,23 @@ tools/release.local
 
 # Android NDK CMake cache
 .cxx/
+
+# Android SDK binaries, packaged applications, and voice-pack licenses stay local.
+*.so
+*.aar
+*.apk
+*.aab
+*.app/
+*.zip
+*.7z
+*.APM
+*.apm
+*.bep
+*.nnm
+*.tdat
+*.license
+tvdata.s
+
+# Python staging/check-tool caches
+__pycache__/
+*.pyc

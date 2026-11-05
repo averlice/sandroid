@@ -1,9 +1,11 @@
-/* ClassicVoices neural bridge (Jenny, Aria, Guy; Sonia, Ryan; Neerja, Prabhat) - see cvn_bridge.h.
+/* ClassicVoices neural bridge (Jenny, Aria, Guy; Sonia, Ryan; Neerja, Prabhat; and the Azure packs Jane and Sara) -
+ * see cvn_bridge.h.
  *
- * The engine is Microsoft's Speech SDK (1.33) with its embedded (offline) TTS extension and ONNX runtime, as three
- * dylibs that are dlopen'ed at run time (the core one loads the other two from its own folder). Only its C API is used,
- * through function pointers; the few types and ids it needs are declared here (from the SDK's C headers:
- * speechapi_c_common.h, _property_bag.h, _audio_stream.h), so no SDK header is vendored.
+ * The engine is Microsoft's Speech SDK (1.33 on Apple platforms, 1.50 on Android) with its embedded (offline) TTS
+ * extension and ONNX runtime, as three shared libraries (dylibs there, .so's here) that are dlopen'ed at run time - the
+ * core one loads the other two from its own folder. Only its C API is used, through function pointers; the few types and
+ * ids it needs are declared here (from the SDK's C headers: speechapi_c_common.h, _property_bag.h, _audio_stream.h), so
+ * no SDK header is vendored.
  *
  * Rate: SSML <prosody rate="x">. The engine applies it as a factor on the voice's own RateAdjustment (its INI): measured
  * 2026-09-27, prosody rate 1.37 / 2.0 / 3.0 renders BYTE-IDENTICAL to the INI's RateAdjustment set to 1.37 / 2.0 / 3.0 x the
@@ -15,7 +17,11 @@
  * The voices' files are shared where they are byte-identical (checked by `make neural-data`): the en-US voices use
  * OneCoreVoice's MSTTSLocEnUS.dat and enUS.*.dat, the en-GB voices five of its EnGB/enGB domain files; the engine opens
  * every file by name in one folder, so each voice gets a folder of symbolic links in work_dir. (Without the domain files
- * the engine refuses the voice: EMBEDDED_TTS_ERROR_WRONG_DECRYPTION_KEY - measured.) */
+ * the engine refuses the voice: EMBEDDED_TTS_ERROR_WRONG_DECRYPTION_KEY - measured.) The Azure embedded packs (Jane,
+ * Sara) share nothing: they carry their own language data, their models are unencrypted, and their key is the pack's own
+ * SynthModel.license, passed byte for byte (the engine verifies its signature, so trimming it is an AuthenticationFailure;
+ * the encrypted Windows models take the shared model.key with the "Key:" prefix instead). Azure's pack format needs SDK
+ * 1.50: 1.33 does not know the voice at all, whatever path or name it is given. */
 #include "cvn_bridge.h"
 #include "cv_resample.h"
 
@@ -32,7 +38,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(__ANDROID__)
+#  include <android/log.h>
+/* Failures only: logcat is the only place a device can report why a voice would not open. */
+#  define CVN_LOG(...) __android_log_print(ANDROID_LOG_WARN, "sandroid-neural", __VA_ARGS__)
+#else
+#  define CVN_LOG(...) ((void)0)
+#endif
+
 /* ---- the SDK's C API (speechapi_c_*.h) ---- */
+/* The same engine ships as dylibs on Apple platforms and as .so files on Android. */
+#if defined(__ANDROID__)
+#  define CVN_SDK_SUFFIX ".so"
+#else
+#  define CVN_SDK_SUFFIX ".dylib"
+#endif
+
 typedef uintptr_t SPXHR;          /* 0 = success */
 typedef void *SPXH;               /* every handle */
 #define SPX_INVALID ((SPXH)(intptr_t)-1)
@@ -53,20 +74,37 @@ typedef SPXHR (*fn_start)(SPXH, const char *, uint32_t, SPXH *);
 typedef SPXHR (*fn_ds_create)(SPXH *, SPXH);
 typedef SPXHR (*fn_ds_read)(SPXH, uint8_t *, uint32_t, uint32_t *);
 typedef SPXHR (*fn_ds_status)(SPXH, int *);
+/* why a synthesis was cancelled */
+typedef SPXHR (*fn_ds_error_code)(SPXH, int *);
+typedef SPXHR (*fn_ds_cancel_reason)(SPXH, int *);
 
 /* ---- the voices ---- */
 typedef struct {
-    const char *name, *locale, *ini, *engine_name;
+    const char *name;         /* the voice's short name: what the app and the JNI layer pass */
+    const char *locale;
+    const char *ini;          /* the voice's settings file, inside its folder */
+    const char *engine_name;  /* what the SDK knows the voice as, in properties and SSML */
+    const char *folder;       /* folder under NeuralVoices/ holding the voice's files */
+    const char *key_file;     /* the voice's own key/license file, NULL for the shared model.key */
+    int shared_onecore;       /* 1 = the voice borrows OneCoreVoice's language data */
+    int voice_in_ssml;        /* 1 = name the voice again inside the SSML */
 } nv_def;
 
 static const nv_def VOICES[] = {
-    {"Jenny", "en-US", "1033.INI", "Microsoft Jenny (Natural) - English (United States)"},
-    {"Aria", "en-US", "1033.INI", "Microsoft Aria (Natural) - English (United States)"},
-    {"Guy", "en-US", "1033.INI", "Microsoft Guy (Natural) - English (United States)"},
-    {"Sonia", "en-GB", "2057.INI", "Microsoft Sonia (Natural) - English (United Kingdom)"},
-    {"Ryan", "en-GB", "2057.INI", "Microsoft Ryan (Natural) - English (United Kingdom)"},
-    {"Neerja", "en-IN", "1081.INI", "Microsoft Neerja (Natural) - English (India)"},
-    {"Prabhat", "en-IN", "1081.INI", "Microsoft Prabhat (Natural) - English (India)"},
+    {"Jenny", "en-US", "1033.INI", "Microsoft Jenny (Natural) - English (United States)", "Jenny", NULL, 1, 1},
+    {"Aria", "en-US", "1033.INI", "Microsoft Aria (Natural) - English (United States)", "Aria", NULL, 1, 1},
+    {"Guy", "en-US", "1033.INI", "Microsoft Guy (Natural) - English (United States)", "Guy", NULL, 1, 1},
+    {"Sonia", "en-GB", "2057.INI", "Microsoft Sonia (Natural) - English (United Kingdom)", "Sonia", NULL, 1, 1},
+    {"Ryan", "en-GB", "2057.INI", "Microsoft Ryan (Natural) - English (United Kingdom)", "Ryan", NULL, 1, 1},
+    {"Neerja", "en-IN", "1081.INI", "Microsoft Neerja (Natural) - English (India)", "Neerja", NULL, 1, 1},
+    {"Prabhat", "en-IN", "1081.INI", "Microsoft Prabhat (Natural) - English (India)", "Prabhat", NULL, 1, 1},
+    /* Azure embedded voices. Their models are unencrypted, so instead of the shared model.key
+     * each pack carries its own SynthModel.license, and each carries its own copy of the en-US
+     * language data - so they must not be given OneCoreVoice's files on top of it. */
+    {"Jane", "en-US", "1033.INI", "Microsoft Server Speech Text to Speech Voice (en-US, JaneNeural)",
+     "en-US-JaneNeural", "SynthModel.license", 0, 0},
+    {"Sara", "en-US", "1033.INI", "Microsoft Server Speech Text to Speech Voice (en-US, SaraNeural)",
+     "en-US-SaraNeural", "SynthModel.license", 0, 0},
 };
 #define NVOICES ((int)(sizeof VOICES / sizeof VOICES[0]))
 
@@ -86,16 +124,6 @@ static const nv_link ONECORE_EN_GB[] = {
 
 /* ---- process-wide state: one engine ---- */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-static _Thread_local char g_error[256];
-
-const char *cvn_last_error(void) { return g_error; }
-
-static int sdk_failed(SPXHR code, const char *operation)
-{
-    if (!code) return 0;
-    snprintf(g_error, sizeof g_error, "%s failed (SDK code 0x%zx)", operation, (size_t)code);
-    return 1;
-}
 static struct {
     void *dl;
     fn_h cfg_create;
@@ -109,11 +137,13 @@ static struct {
     fn_ds_create ds_create;
     fn_ds_read ds_read;
     fn_ds_status ds_status;
+    fn_ds_error_code ds_error_code;
+    fn_ds_cancel_reason ds_cancel_reason;
 
     SPXH config[NVOICES], synth[NVOICES]; /* per voice, built on its first utterance; NULL = not built */
     int prepared[NVOICES];                /* work folder built in this process */
     char work[NVOICES][PATH_MAX];         /* the voice's work folder */
-    char key[1024];
+    char key[NVOICES][1024];              /* per voice: the shared model.key or the voice's own license */
 } G;
 
 struct cvn_voice {
@@ -121,9 +151,13 @@ struct cvn_voice {
     cv_resampler rs; /* 24000 -> 22050 */
 };
 
+/* Android has no error buffer to fill; the reason is kept here for cvn_last_error. */
+static char g_error[256];
+
 static void seterr(char *err, size_t errlen, const char *fmt, const char *a)
 {
     if (err && errlen) snprintf(err, errlen, fmt, a ? a : "");
+    snprintf(g_error, sizeof g_error, fmt, a ? a : "");
 }
 
 static int voice_index(const char *name)
@@ -158,16 +192,31 @@ static int load_sdk(const char *sdk_dir, char *err, size_t errlen)
     char path[PATH_MAX];
     void *dl;
     if (G.dl) return 0;
-#ifdef __ANDROID__
-    snprintf(path, sizeof path, "%s/libMicrosoft.CognitiveServices.Speech.core.so", sdk_dir ? sdk_dir : "");
-#else
-    snprintf(path, sizeof path, "%s/libMicrosoft.CognitiveServices.Speech.core.dylib", sdk_dir ? sdk_dir : "");
-#endif
+    snprintf(path, sizeof path, "%s/libMicrosoft.CognitiveServices.Speech.core" CVN_SDK_SUFFIX, sdk_dir ? sdk_dir : "");
     dl = dlopen(path, RTLD_NOW | RTLD_GLOBAL); /* the extension dylibs find the core's symbols through it */
     if (!dl) {
         seterr(err, errlen, "cannot load the speech engine: %s", dlerror());
         return -1;
     }
+#if defined(__ANDROID__)
+    /* The extensions depend on each other (embedded.tts -> runtime -> onnxruntime), so load
+     * them in that order before the core is asked for a synthesizer. The core often loads
+     * them itself; a successful dlopen just returns the handle it already has. A failure
+     * here is not fatal on its own: building the synthesizer reports what is missing. */
+    {
+        static const char *const ext[] = {
+            "libMicrosoft.CognitiveServices.Speech.extension.onnxruntime" CVN_SDK_SUFFIX,
+            "libMicrosoft.CognitiveServices.Speech.extension.embedded.tts.runtime" CVN_SDK_SUFFIX,
+            "libMicrosoft.CognitiveServices.Speech.extension.embedded.tts" CVN_SDK_SUFFIX,
+        };
+        size_t i;
+        for (i = 0; i < sizeof ext / sizeof ext[0]; i++) {
+            char ext_path[PATH_MAX];
+            snprintf(ext_path, sizeof ext_path, "%s/%s", sdk_dir ? sdk_dir : "", ext[i]);
+            dlopen(ext_path, RTLD_NOW | RTLD_GLOBAL);
+        }
+    }
+#endif
     SYM(cfg_create, fn_h, "embedded_speech_config_create");
     SYM(cfg_add_path, fn_hs, "embedded_speech_config_add_path");
     SYM(cfg_get_bag, fn_hh, "speech_config_get_property_bag");
@@ -184,6 +233,9 @@ static int load_sdk(const char *sdk_dir, char *err, size_t errlen)
     SYM(ds_read, fn_ds_read, "audio_data_stream_read");
     SYM(ds_status, fn_ds_status, "audio_data_stream_get_status");
     SYM(ds_release, fn_rel, "audio_data_stream_release");
+    /* optional: the reason the engine gave for cancelling a synthesis */
+    G.ds_error_code = (fn_ds_error_code)dlsym(dl, "audio_data_stream_get_canceled_error_code");
+    G.ds_cancel_reason = (fn_ds_cancel_reason)dlsym(dl, "audio_data_stream_get_reason_canceled");
     G.dl = dl; /* never dlclose'd: the SDK's threads may outlive a synthesizer */
     return 0;
 }
@@ -257,36 +309,73 @@ static void remove_folder_entries(const char *dir)
     closedir(d);
 }
 
+/* Trims the newline a key file ends with; the key/license text itself may contain spaces. */
+static void trim_end(char *text)
+{
+    size_t n = strlen(text);
+    while (n && (text[n - 1] == '\n' || text[n - 1] == '\r' || text[n - 1] == ' ')) text[--n] = 0;
+}
+
+static int load_key(int i, const char *data_dir, const char *src, char *err, size_t errlen)
+{
+    const nv_def *v = &VOICES[i];
+    char path[PATH_MAX];
+    char *key = NULL;
+    if (G.key[i][0]) return 0;
+    if (v->key_file && !v->key_file[0]) return 0; /* unencrypted voice: no key property at all */
+    if (v->key_file) {
+        /* A voice's own license is passed exactly as the pack stores it: the engine checks
+         * its signature, so even a dropped trailing newline is rejected (AuthenticationFailure). */
+        snprintf(path, sizeof path, "%s/%s", src, v->key_file);
+        key = read_file(path, sizeof G.key[i] - 1);
+        if (key) snprintf(G.key[i], sizeof G.key[i], "%s", key);
+        free(key);
+        if (!G.key[i][0]) {
+            seterr(err, errlen, "no license for %s", v->name);
+            return -1;
+        }
+        return 0;
+    }
+    snprintf(path, sizeof path, "%s/model.key", data_dir); /* the Windows voices all share one key */
+    key = read_file(path, sizeof G.key[i] - 1);
+    if (!key) {
+        seterr(err, errlen, "no model key in %s", data_dir);
+        return -1;
+    }
+    trim_end(key);
+    /* An encrypted model's key is marked as such; an unencrypted pack gives a licence instead,
+     * which is passed untouched (see above). */
+    snprintf(G.key[i], sizeof G.key[i], strncmp(key, "Key:", 4) ? "Key:%s" : "%s", key);
+    free(key);
+    if (!G.key[i][0]) {
+        seterr(err, errlen, "empty model key for %s", v->name);
+        return -1;
+    }
+    return 0;
+}
+
 static int prepare(int i, const char *data_dir, const char *onecore_dir, const char *work_dir, char *err, size_t errlen)
 {
     const nv_def *v = &VOICES[i];
     char src[PATH_MAX], path[PATH_MAX];
-    char *key;
     if (G.prepared[i]) return 0;
     if (!data_dir || !*data_dir || !onecore_dir || !*onecore_dir || !work_dir || !*work_dir) {
         seterr(err, errlen, "no data folder%s", "");
         return -1;
     }
-    if (!G.key[0]) {
-        snprintf(path, sizeof path, "%s/model.key", data_dir);
-        key = read_file(path, sizeof G.key - 1);
-        if (!key) {
-            seterr(err, errlen, "no model key in %s", data_dir);
-            return -1;
-        }
-        key[strcspn(key, "\r\n")] = 0;
-        snprintf(G.key, sizeof G.key, "%s", key);
-        free(key);
-        if (!G.key[0]) {
-            seterr(err, errlen, "empty model key%s", "");
-            return -1;
-        }
-    }
-    snprintf(src, sizeof src, "%s/%s", data_dir, v->name);
+    snprintf(src, sizeof src, "%s/%s", data_dir, v->folder);
+    if (load_key(i, data_dir, src, err, errlen)) return -1;
     snprintf(path, sizeof path, "%s/%s", src, v->ini);
     if (access(path, R_OK)) {
         seterr(err, errlen, "no voice data for %s", v->name);
         return -1;
+    }
+    if (!v->shared_onecore) {
+        /* Self-contained pack: the voice keeps its own folder and its own language data, so the
+         * engine is given the data root and finds the voice there itself - no links needed. */
+        snprintf(G.work[i], sizeof G.work[i], "%s", data_dir);
+        G.prepared[i] = 1;
+        return 0;
     }
     mkdir(work_dir, 0700);
     snprintf(G.work[i], sizeof G.work[i], "%s/%s", work_dir, v->name);
@@ -333,23 +422,37 @@ static void drop_voice(int i)
 static SPXH synth_for(int i)
 {
     SPXH bag = SPX_INVALID, cfg = SPX_INVALID, syn = SPX_INVALID;
+    SPXHR rc;
     if (G.synth[i]) return G.synth[i];
-    if (sdk_failed(G.cfg_create(&cfg), "Create embedded configuration")) return NULL;
+    rc = G.cfg_create(&cfg);
+    if (rc) {
+        CVN_LOG("config create for %s failed: 0x%x", VOICES[i].name, (unsigned)rc);
+        return NULL;
+    }
     G.config[i] = cfg;
-    if (sdk_failed(G.cfg_add_path(cfg, G.work[i]), "Set voice path") ||
-        sdk_failed(G.cfg_set_format(cfg, FMT_RAW_24K_16BIT_MONO), "Set PCM format") ||
-        sdk_failed(G.cfg_get_bag(cfg, &bag), "Get voice properties")) {
+    /* The key and the voice are set before the paths are added: the configuration checks the
+     * licence against the models as it loads them, so setting them afterwards is too late. */
+    rc = G.cfg_get_bag(cfg, &bag);
+    if (!rc) rc = G.cfg_set_format(cfg, FMT_RAW_24K_16BIT_MONO);
+    if (rc) {
+        CVN_LOG("config for %s failed: 0x%x", VOICES[i].name, (unsigned)rc);
         drop_voice(i);
         return NULL;
     }
-    if (sdk_failed(G.bag_set(bag, PROP_SYNTH_OFFLINE_VOICE, NULL, VOICES[i].engine_name), "Select natural voice") ||
-        sdk_failed(G.bag_set(bag, PROP_SYNTH_MODEL_KEY, NULL, G.key), "Set model key")) {
-        G.bag_release(bag);
-        drop_voice(i);
-        return NULL;
-    }
+    if ((rc = G.bag_set(bag, PROP_SYNTH_OFFLINE_VOICE, NULL, VOICES[i].engine_name)))
+        CVN_LOG("voice property for %s failed: 0x%x", VOICES[i].name, (unsigned)rc);
+    if (G.key[i][0] && (rc = G.bag_set(bag, PROP_SYNTH_MODEL_KEY, NULL, G.key[i])))
+        CVN_LOG("key property for %s failed: 0x%x", VOICES[i].name, (unsigned)rc);
     G.bag_release(bag);
-    if (sdk_failed(G.synth_create(&syn, cfg, SPX_INVALID), "Create offline synthesizer")) {
+    rc = G.cfg_add_path(cfg, G.work[i]);
+    if (rc) {
+        CVN_LOG("path for %s at %s failed: 0x%x", VOICES[i].name, G.work[i], (unsigned)rc);
+        drop_voice(i);
+        return NULL;
+    }
+    rc = G.synth_create(&syn, cfg, SPX_INVALID); /* no audio output: the audio comes back to us */
+    if (rc) {
+        CVN_LOG("synthesizer for %s failed: 0x%x", VOICES[i].name, (unsigned)rc);
         drop_voice(i);
         return NULL;
     }
@@ -367,8 +470,8 @@ void cvn_release_engine(void)
 }
 
 /* ---- public ---- */
-cvn_voice *cvn_voice_open(const char *sdk_dir, const char *data_dir, const char *onecore_dir, const char *work_dir,
-                          const char *voice, char *err, size_t errlen)
+static cvn_voice *open_common(const char *sdk_dir, const char *data_dir, const char *onecore_dir, const char *work_dir,
+                              const char *voice, char *err, size_t errlen)
 {
     int i = voice_index(voice);
     cvn_voice *v;
@@ -393,6 +496,32 @@ cvn_voice *cvn_voice_open(const char *sdk_dir, const char *data_dir, const char 
     return v;
 }
 
+cvn_voice *cvn_voice_open(const char *sdk_dir, const char *data_dir, const char *onecore_dir, const char *work_dir,
+                          const char *voice, char *err, size_t errlen)
+{
+    return open_common(sdk_dir, data_dir, onecore_dir, work_dir, voice, err, errlen);
+}
+
+#if defined(__ANDROID__)
+/* The app's own layout: <data_root>/NeuralVoices and <data_root>/OneCoreVoice, so the caller
+ * only names the root it unpacked the assets into. */
+cvn_voice *cvn_voice_open_android(const char *sdk_dir, const char *data_root, const char *work_dir, const char *voice)
+{
+    char neural[PATH_MAX], onecore[PATH_MAX];
+    cvn_voice *v;
+    snprintf(neural, sizeof neural, "%s/NeuralVoices", data_root ? data_root : "");
+    snprintf(onecore, sizeof onecore, "%s/OneCoreVoice", data_root ? data_root : "");
+    v = open_common(sdk_dir, neural, onecore, work_dir, voice, g_error, sizeof g_error);
+    if (!v) CVN_LOG("open %s failed: %s", voice ? voice : "?", g_error);
+    return v;
+}
+
+const char *cvn_last_error(void)
+{
+    return g_error;
+}
+#endif
+
 void cvn_voice_close(cvn_voice *v)
 {
     if (!v) return;
@@ -408,7 +537,8 @@ int cvn_voice_sample_rate(const cvn_voice *v)
 
 /* The request: the text XML-escaped (& < > " ') inside <prosody rate pitch>. At rate 1 and pitch 0 it renders exactly like
  * the plain text (measured). */
-static char *ssml_for(const char *engine_name, const char *locale, const char *text, double speed, double semitones)
+static char *ssml_for(const char *engine_name, const char *locale, const char *text, double speed, double semitones,
+                      int with_voice)
 {
     size_t n = strlen(text), cap = n * 6 + 512, o = 0;
     char *s = malloc(cap);
@@ -418,10 +548,19 @@ static char *ssml_for(const char *engine_name, const char *locale, const char *t
     if (semitones < -12) semitones = -12;
     if (semitones > 12) semitones = 12;
     pct = (pow(2.0, semitones / 12.0) - 1.0) * 100.0;
-    o += (size_t)snprintf(s + o, cap - o,
-                          "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='%s'>"
-                          "<voice name='%s'><prosody rate='%.3f' pitch='%+.1f%%'>",
-                          locale, engine_name, speed, pct);
+    /* Embedded voices take the voice from the configuration, not from SSML, so the Azure
+     * packs are asked for with plain prosody; the Windows voices accept the name here. */
+    if (with_voice) {
+        o += (size_t)snprintf(s + o, cap - o,
+                              "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='%s'>"
+                              "<voice name='%s'><prosody rate='%.3f' pitch='%+.1f%%'>",
+                              locale, engine_name, speed, pct);
+    } else {
+        o += (size_t)snprintf(s + o, cap - o,
+                              "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='%s'>"
+                              "<prosody rate='%.3f' pitch='%+.1f%%'>",
+                              locale, speed, pct);
+    }
     for (p = text; *p; p++) {
         const char *rep = NULL;
         switch (*p) {
@@ -438,7 +577,7 @@ static char *ssml_for(const char *engine_name, const char *locale, const char *t
             s[o++] = *p;
         }
     }
-    o += (size_t)snprintf(s + o, cap - o, "</prosody></voice></speak>");
+    o += (size_t)snprintf(s + o, cap - o, with_voice ? "</prosody></voice></speak>" : "</prosody></speak>");
     return s;
 }
 
@@ -454,7 +593,6 @@ int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double sem
     size_t have = 0;
     int rc = 0, stopped = 0, status = 0;
     if (!v || !utf8 || !fn) return -1;
-    g_error[0] = 0;
     clean = cv_sanitize_alloc(utf8);
     if (!clean) return -1;
     for (p = clean; *p == ' '; p++) {}
@@ -472,22 +610,31 @@ int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double sem
     syn = G.dl && G.prepared[v->index] ? synth_for(v->index) : NULL;
     /* markup in the text is escaped: spoken, never obeyed */
     ssml = syn ? ssml_for(VOICES[v->index].engine_name, VOICES[v->index].locale, clean, cvn_speed_factor(sapi_rate),
-                          semitones)
+                          semitones, VOICES[v->index].voice_in_ssml)
                : NULL;
-    if (!ssml || sdk_failed(G.start_ssml(syn, ssml, (uint32_t)strlen(ssml), &res), "Start offline speech") ||
-        sdk_failed(G.ds_create(&ds, res), "Open PCM stream")) {
+    if (!ssml) {
         rc = -1;
         goto out;
+    }
+    {
+        SPXHR hr = G.start_ssml(syn, ssml, (uint32_t)strlen(ssml), &res);
+        if (hr) {
+            CVN_LOG("start_ssml for %s failed: 0x%x", VOICES[v->index].name, (unsigned)hr);
+            rc = -1;
+            goto out;
+        }
+        hr = G.ds_create(&ds, res);
+        if (hr) {
+            CVN_LOG("audio stream for %s failed: 0x%x", VOICES[v->index].name, (unsigned)hr);
+            rc = -1;
+            goto out;
+        }
     }
     cv_rs_reset(&v->rs);
     for (;;) {
         uint32_t got = 0;
         size_t samples, no;
-        if (sdk_failed(G.ds_read(ds, buf + have, (uint32_t)(sizeof buf - 1 - have), &got), "Read PCM stream")) {
-            rc = -1;
-            break;
-        }
-        if (got == 0) break;
+        if (G.ds_read(ds, buf + have, (uint32_t)(sizeof buf - 1 - have), &got) || got == 0) break;
         have += got;
         samples = have / 2;
         if (samples) {
@@ -514,8 +661,11 @@ int cvn_voice_speak(cvn_voice *v, const char *utf8, double sapi_rate, double sem
     if (!stopped) {
         size_t no;
         if (G.ds_status(ds, &status) == 0 && status == STREAM_CANCELED) {
+            int code = -1, reason = -1;
+            if (G.ds_error_code) G.ds_error_code(ds, &code);
+            if (G.ds_cancel_reason) G.ds_cancel_reason(ds, &reason);
+            CVN_LOG("synthesis canceled for %s: error=%d reason=%d", VOICES[v->index].name, code, reason);
             rc = -1; /* the engine gave up (the text, or a broken voice): whatever came is kept */
-            snprintf(g_error, sizeof g_error, "Offline speech canceled by SDK; check voice model/runtime compatibility");
         }
         no = cv_rs_run(&v->rs, 1);
         if (no && cv_trimmer_feed(t, v->rs.out, no)) rc = 1;

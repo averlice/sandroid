@@ -25,7 +25,7 @@ class TtsEngineCheckActivity : Activity() {
             else -> {
                 val available = ArrayList<String>()
                 VoiceCatalog.voices
-                    .filter { VoiceAssets.isAvailable(this, it.engine) }
+                    .filter { VoiceAssets.isAvailable(this, it) }
                     .map(VoiceDef::locale).distinct()
                     .forEach { locale -> iso3Tag(locale)?.let(available::add) }
                 setResult(

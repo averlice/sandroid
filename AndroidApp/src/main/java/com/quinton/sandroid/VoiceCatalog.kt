@@ -1,12 +1,13 @@
 package com.quinton.sandroid
 
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import java.util.Locale
 
 enum class Engine {
     SAPI5, SAPI4, TRUVOICE, ANNA, ONECORE, NEURAL;
 
-    /** Settings group only; native dispatch and asset availability still use the real engine. */
+    /** The group a voice belongs to in the settings screen: Anna is SAPI 5's own voice. */
     val settingsGroup: Engine get() = if (this == ANNA) SAPI5 else this
 }
 
@@ -16,10 +17,15 @@ data class VoiceDef(
     val female: Boolean = false, val emotion: String = ""
 ) {
     fun locale(): Locale = Locale.forLanguageTag(language)
-    fun androidVoice(): android.speech.tts.Voice = android.speech.tts.Voice(
-        name, locale(), if (engine == Engine.NEURAL) android.speech.tts.Voice.QUALITY_VERY_HIGH
-            else android.speech.tts.Voice.QUALITY_NORMAL,
-        android.speech.tts.Voice.LATENCY_NORMAL, false, mutableSetOf()
+
+    /**
+     * The natural voices are far heavier than the sampled ones, so they are advertised
+     * with the quality the list is supposed to show them at.
+     */
+    fun androidVoice(): Voice = Voice(
+        name, locale(),
+        if (engine == Engine.NEURAL) Voice.QUALITY_VERY_HIGH else Voice.QUALITY_NORMAL,
+        Voice.LATENCY_NORMAL, false, mutableSetOf()
     )
 }
 
@@ -30,13 +36,15 @@ object VoiceCatalog {
         VoiceDef("truvoice_$id", name, Engine.TRUVOICE, dataName = "$mode, American English (TruVoice)", female = female)
 
     val voices: List<VoiceDef> = buildList {
+        // Microsoft's offline neural voices, the same models Windows 11 Narrator ships.
         listOf(
             Triple("Jenny", "en-US", true), Triple("Aria", "en-US", true), Triple("Guy", "en-US", false),
             Triple("Sonia", "en-GB", true), Triple("Ryan", "en-GB", false),
-            Triple("Neerja", "en-IN", true), Triple("Prabhat", "en-IN", false)
+            Triple("Neerja", "en-IN", true), Triple("Prabhat", "en-IN", false),
+            // Azure embedded packs: their own licensed models, same offline engine.
+            Triple("Jane", "en-US", true), Triple("Sara", "en-US", true)
         ).forEach { (name, locale, female) ->
-            add(VoiceDef("neural_${name.lowercase()}", "$name (Natural)", Engine.NEURAL,
-                locale, name, female = female))
+            add(VoiceDef("neural_${name.lowercase()}", "$name (Natural)", Engine.NEURAL, locale, name, female = female))
         }
         addAll(listOf(
             VoiceDef("sam", "Sam (SAPI 5)", Engine.SAPI5, "en-US", "Sam"),

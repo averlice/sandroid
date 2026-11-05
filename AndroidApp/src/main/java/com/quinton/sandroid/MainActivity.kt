@@ -48,7 +48,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Only voices whose data is bundled can speak; the rest would silently fall back.
-        availableVoices = VoiceCatalog.voices.filter { VoiceAssets.isAvailable(this, it.engine) }
+        availableVoices = VoiceCatalog.voices.filter { VoiceAssets.isAvailable(this, it) }
             .ifEmpty { VoiceCatalog.voices }
         val savedVoice = availableVoices.firstOrNull { it.id == prefs.getString(KEY_VOICE, null) }
             ?: availableVoices.first()

@@ -2,9 +2,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include <limits.h>
-#include <android/log.h>
 #include "cv_bridge.h"
 #include "cv4n_bridge.h"
 #include "cvt_bridge.h"
@@ -14,7 +11,14 @@
 
 typedef struct {
     int engine;
-    union { cv_voice *sapi5; cv4n_voice *sapi4; cvt_voice *truvoice; cva_voice *anna; cvo_voice *onecore; cvn_voice *neural; } v;
+    union {
+        cv_voice *sapi5;
+        cv4n_voice *sapi4;
+        cvt_voice *truvoice;
+        cva_voice *anna;
+        cvo_voice *onecore;
+        cvn_voice *neural;
+    } v;
 } VoiceHandle;
 
 enum { E_SAPI5, E_SAPI4, E_TRUVOICE, E_ANNA, E_ONECORE, E_NEURAL };
@@ -45,35 +49,27 @@ JNIEXPORT jlong JNICALL Java_com_quinton_sandroid_NativeEngine_nativeOpen(
     if (h && !(h->v.sapi5 || h->v.sapi4 || h->v.truvoice || h->v.anna || h->v.onecore)) { free(h); h = NULL; }
 done:
     unutf(env, rootValue, root); unutf(env, dataValue, data); unutf(env, effectValue, effect); unutf(env, emotionValue, emotion);
-    if (!h) {
-        const char *message = *err ? err : "Cannot allocate voice";
-        __android_log_print(ANDROID_LOG_ERROR, "Sandroid", "Engine %d open failed: %s", engine, message);
-        jclass cls = (*env)->FindClass(env, "java/lang/IllegalStateException");
-        if (cls) (*env)->ThrowNew(env, cls, message);
-    }
     return (jlong)(intptr_t)h;
 }
 
+/* The neural voices keep their SDK configuration for the life of the process, so opening one
+ * is cheap after the first utterance; the voice name is what the Kotlin side calls dataName. */
 JNIEXPORT jlong JNICALL Java_com_quinton_sandroid_NativeEngine_nativeOpenNeural(
-    JNIEnv *env, jobject self, jstring sdkValue, jstring rootValue, jstring workValue, jstring voiceValue) {
+    JNIEnv *env, jobject self, jstring sdkValue, jstring dataValue, jstring workValue, jstring voiceValue) {
     (void)self;
-    const char *sdk = utf(env, sdkValue), *root = utf(env, rootValue);
-    const char *work = utf(env, workValue), *voice = utf(env, voiceValue);
-    char data[PATH_MAX], onecore[PATH_MAX], err[512] = {0};
-    snprintf(data, sizeof data, "%s/NeuralVoices", root);
-    snprintf(onecore, sizeof onecore, "%s/OneCoreVoice", root);
-    VoiceHandle *h = calloc(1, sizeof(*h));
-    if (h) {
-        h->engine = E_NEURAL;
-        h->v.neural = cvn_voice_open(sdk, data, onecore, work, voice, err, sizeof err);
-        if (!h->v.neural) { free(h); h = NULL; }
+    const char *sdk = utf(env, sdkValue), *data = utf(env, dataValue), *work = utf(env, workValue), *voice = utf(env, voiceValue);
+    cvn_voice *v = cvn_voice_open_android(sdk, data, work, voice);
+    VoiceHandle *h = NULL;
+    if (v) {
+        h = calloc(1, sizeof(*h));
+        if (h) {
+            h->engine = E_NEURAL;
+            h->v.neural = v;
+        } else {
+            cvn_voice_close(v);
+        }
     }
-    unutf(env, sdkValue, sdk); unutf(env, rootValue, root);
-    unutf(env, workValue, work); unutf(env, voiceValue, voice);
-    if (!h) {
-        jclass cls = (*env)->FindClass(env, "java/lang/IllegalStateException");
-        if (cls) (*env)->ThrowNew(env, cls, *err ? err : "Cannot allocate natural voice");
-    }
+    unutf(env, sdkValue, sdk); unutf(env, dataValue, data); unutf(env, workValue, work); unutf(env, voiceValue, voice);
     return (jlong)(intptr_t)h;
 }
 
@@ -157,10 +153,5 @@ JNIEXPORT jint JNICALL Java_com_quinton_sandroid_NativeEngine_nativeSpeak(
     }
 done:
     unutf(env, textValue, text);
-    if (rc < 0 && h->engine == E_NEURAL && !(*env)->ExceptionCheck(env)) {
-        jclass cls = (*env)->FindClass(env, "java/lang/IllegalStateException");
-        const char *error = cvn_last_error();
-        if (cls) (*env)->ThrowNew(env, cls, *error ? error : "Natural voice synthesis failed");
-    }
     return rc;
 }

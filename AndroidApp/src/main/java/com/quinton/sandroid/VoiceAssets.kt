@@ -27,6 +27,18 @@ internal object VoiceAssets {
         context.assets.list(folderFor(engine))?.isNotEmpty() == true
     }.getOrDefault(false)
 
+    /** Neural packs can be staged independently, especially the optional Azure packs. */
+    fun isAvailable(context: Context, voice: VoiceDef): Boolean {
+        if (voice.engine != Engine.NEURAL) return isAvailable(context, voice.engine)
+        val folder = when (voice.dataName) {
+            "Jane", "Sara" -> "en-US-${voice.dataName}Neural"
+            else -> voice.dataName
+        }
+        return runCatching {
+            context.assets.list("NeuralVoices/$folder")?.isNotEmpty() == true
+        }.getOrDefault(false)
+    }
+
     @Synchronized
     fun install(context: Context): File {
         val root = File(context.filesDir, "voice-data")

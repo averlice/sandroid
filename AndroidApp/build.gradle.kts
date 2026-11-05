@@ -21,10 +21,26 @@ android {
         minSdk = 26
         targetSdk = 35
         ndkVersion = "27.2.12479018"
-        versionCode = 9
-        versionName = "0.2.7"
+        versionCode = 12
+        versionName = "0.3.2"
         testInstrumentationRunner = "com.quinton.sandroid.NaturalVoiceInstrumentation"
         ndk { abiFilters += selectedAbis }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include(*selectedAbis.toTypedArray())
+            isUniversalApk = true
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {
@@ -46,20 +62,31 @@ android {
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/sandroidAssets"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("generated/speechJni"))
     // The native bridge and the SDK locate runtime extensions by their filesystem path.
-    packaging { jniLibs { useLegacyPackaging = true } }
+    packaging { jniLibs {
+        useLegacyPackaging = true
+        keepDebugSymbols += "**/libMicrosoft*.so"
+    } }
 }
 
 val embeddedSpeechSdk by configurations.creating
-val embeddedSpeechVersion = providers.gradleProperty("embeddedSpeechVersion").getOrElse("1.33.0")
+// Preserve locally supplied SDKs; otherwise use the version required by the latest bridge.
+val embeddedSpeechVersion = providers.gradleProperty("embeddedSpeechVersion").orNull
+    ?: if (rootProject.file("NeuralSDK/android").isDirectory) null else "1.50.0"
 dependencies {
     // Only extract native offline TTS libraries; the Java/cloud SDK is not used.
-    add(embeddedSpeechSdk.name, "com.microsoft.cognitiveservices.speech:client-sdk-embedded:$embeddedSpeechVersion@aar")
+    if (embeddedSpeechVersion != null) {
+        add(embeddedSpeechSdk.name, "com.microsoft.cognitiveservices.speech:client-sdk-embedded:$embeddedSpeechVersion@aar")
+    }
 }
 val stageSpeechJni by tasks.registering(Sync::class) {
     val libraries = listOf("core", "extension.embedded.tts", "extension.embedded.tts.runtime", "extension.onnxruntime")
     inputs.property("libraries", libraries)
     inputs.property("abis", selectedAbis)
-    from({ zipTree(embeddedSpeechSdk.singleFile) }) {
+    if (embeddedSpeechVersion == null) {
+        from(rootProject.file("NeuralSDK/android")) {
+            include(selectedAbis.map { "$it/*.so" })
+        }
+    } else from({ zipTree(embeddedSpeechSdk.singleFile) }) {
         include(libraries.flatMap { library ->
             selectedAbis.map { abi ->
                 "jni/$abi/libMicrosoft.CognitiveServices.Speech.$library.so"

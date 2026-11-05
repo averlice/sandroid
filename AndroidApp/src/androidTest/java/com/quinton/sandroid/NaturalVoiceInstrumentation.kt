@@ -52,8 +52,11 @@ class NaturalVoiceInstrumentation : Instrumentation() {
                 return
             }
             val root = VoiceAssets.install(targetContext)
-            val natural = VoiceCatalog.voices.filter { it.engine == Engine.NEURAL }
-            check(natural.size == 7)
+            check(VoiceCatalog.voices.count { it.engine == Engine.NEURAL } == 9)
+            val natural = VoiceCatalog.voices.filter {
+                it.engine == Engine.NEURAL && VoiceAssets.isAvailable(targetContext, it)
+            }
+            check(natural.isNotEmpty()) { "No natural voice packs staged" }
             natural.forEach { voice ->
                 check(VoiceAssets.isAvailable(targetContext, voice.engine))
                 val handle = NativeEngine.open(targetContext, root, voice)
@@ -84,7 +87,7 @@ class NaturalVoiceInstrumentation : Instrumentation() {
                 } finally { NativeEngine.close(handle) }
             }
             testSystemService()
-            results.putString("stream", "All seven natural voices produced PCM; cancellation, subsequent speech and Android TTS service passed.\n")
+            results.putString("stream", "All ${natural.size} staged natural voices produced PCM; cancellation, subsequent speech and Android TTS service passed.\n")
             finish(Activity.RESULT_OK, results)
         } catch (error: Throwable) {
             results.putString("stream", "FAILED: ${error.javaClass.simpleName}: ${error.message}\n")
@@ -138,8 +141,11 @@ class NaturalVoiceInstrumentation : Instrumentation() {
         try {
             check(initialized.await(30, TimeUnit.SECONDS) && initCode == TextToSpeech.SUCCESS) { "TTS service initialization failed" }
             val voices = tts.voices.filter { it.name.endsWith("(Natural)") }
-            check(voices.size == 7 && voices.none { it.isNetworkConnectionRequired }) { "Natural voices not registered as offline" }
-            check(tts.setVoice(voices.first { it.name == "Jenny (Natural)" }) == TextToSpeech.SUCCESS)
+            val expected = VoiceCatalog.voices.filter {
+                it.engine == Engine.NEURAL && VoiceAssets.isAvailable(targetContext, it)
+            }.map { it.name }.toSet()
+            check(voices.map { it.name }.toSet() == expected && voices.none { it.isNetworkConnectionRequired }) { "Natural voices not registered as offline" }
+            check(tts.setVoice(voices.first()) == TextToSpeech.SUCCESS)
             val done = CountDownLatch(1)
             var failed = false
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -150,7 +156,7 @@ class NaturalVoiceInstrumentation : Instrumentation() {
             check(tts.synthesizeToFile("Hello from Android's text to speech service.", Bundle(), wav, "natural-smoke") == TextToSpeech.SUCCESS)
             check(done.await(30, TimeUnit.SECONDS) && !failed && wav.length() > 44) { "TTS service did not produce a WAV" }
             check(wav.inputStream().use { String(it.readNBytes(4), Charsets.US_ASCII) } == "RIFF")
-            sendStatus(0, Bundle().apply { putString("stream", "Android TTS service: seven offline voices registered; synthesized WAV (${wav.length()} bytes)\n") })
+            sendStatus(0, Bundle().apply { putString("stream", "Android TTS service: ${voices.size} offline voices registered; synthesized WAV (${wav.length()} bytes)\n") })
         } finally {
             tts.shutdown()
             wav.delete()

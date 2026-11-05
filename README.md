@@ -66,7 +66,7 @@ AnnaVoice/      Anna: the eleven M1033DSK.* files from Windows 7            (mak
 OneCoreVoice/   Windows 10 / 11 OneCore voices and language data            (make onecore-data; the en-AU / en-CA ones:
                 tools/onecore_lof_stage.py, from the Windows 11 Languages and Optional Features image)
 NeuralVoices/   Windows 11 natural voice packages and their model key       (make neural-stage)
-NeuralSDK/      Microsoft's embedded Speech SDK libraries, ios/ and macos/  (make neural-stage)
+NeuralSDK/      Microsoft's embedded Speech SDK libraries, ios/, macos/ and android/  (make neural-stage)
 ```
 
 The make targets stage or check each folder against the SHA-256 lists in `tools/` and `SAPI4/tools/`, so you can tell whether your copy matches the one the engines were checked against.
@@ -90,9 +90,11 @@ The build produces Sapple.app on iOS and macOS. Inside the code the project, its
 
 ## Android (early port)
 
-The Android project is in `AndroidApp/` (kept separate from the Apple `App/` source folder) and is called Sandroid. It provides a system Text-to-Speech service plus a settings screen for picking the voice, speed and pitch. It targets Android 8 (API 26) and builds `armeabi-v7a` (ARM32), `arm64-v8a` (ARM64), and `x86_64` native libraries. Experimental offline natural voices use Microsoft's Android embedded Speech SDK 1.33.0: Jenny, Aria, Guy, Sonia, Ryan, Neerja, and Prabhat. The SDK's four required native libraries are packaged for every selected ABI, including ARM32.
+The Android project is in `AndroidApp/` (kept separate from the Apple `App/` source folder) and is called Sandroid. It provides a system Text-to-Speech service plus a settings screen for picking the voice, speed and pitch. It targets Android 8 (API 26) and builds `armeabi-v7a` (ARM32), `arm64-v8a` (ARM64), and `x86_64` native libraries. Experimental offline natural voices use Microsoft's Android embedded Speech SDK 1.50: Jenny, Aria, Guy, Sonia, Ryan, Neerja, Prabhat, Jane, and Sara. Jane and Sara use their own Azure embedded voice packs and licenses. The latest neural bridge preserves the SSML fix for Windows models.
 
 Open this repository's `sandroid` directory in Android Studio with JDK 17, Android SDK platform 35, Build Tools 34.0.0, NDK 27.2.12479018, and CMake 3.22.1. The included Gradle wrapper downloads Gradle 8.7; a separate Gradle installation is not required. The Gradle build copies any staged data folders into the app assets; the app installs those assets into its private files directory on first use. Stage the same local, gitignored folders described above (`VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and generated `TruVoiceData/tvdata.s`). Voice data and engine tables are not included in this repository. Without TruVoice tables, the Android build uses a non-speaking TruVoice placeholder; the other engines can still use their staged voice data.
+
+Voice data belongs only in the built application and local staging folders. Never commit voice packs, model keys, SDK binaries, or APKs to GitHub. Run `python3 tools/check-repo-data.py` before committing; the repository-data GitHub workflow checks the same rule on pushes and pull requests. Natural voice packs are optional individually; unstaged packs are hidden in settings and Android TTS registration.
 
 For a command-line debug build, set `JAVA_HOME` to your JDK 17 installation and `ANDROID_HOME` to your Android SDK directory (or set `sdk.dir` in a local, gitignored `local.properties` file), then run:
 
@@ -100,7 +102,7 @@ For a command-line debug build, set `JAVA_HOME` to your JDK 17 installation and 
 ./gradlew :androidApp:assembleDebug
 ```
 
-The installable, debug-signed APK is `AndroidApp/build/outputs/apk/debug/androidApp-debug.apk`. The default build is universal: Android 8 and later on ARM32, ARM64, and x86-64 devices. No release signing key is needed for this debug build. A build without any staged voice data will have no usable voices.
+The installable, debug-signed APK is `AndroidApp/build/outputs/apk/debug/androidApp-universal-debug.apk`. The default build produces one APK per ABI plus a universal APK: Android 8 and later on ARM32, ARM64, and x86-64 devices. No release signing key is needed for this debug build. A build without any staged voice data will have no usable voices.
 
 Use the build script to create named APKs in the root `build/` folder:
 
@@ -123,22 +125,22 @@ The instrumentation runner also accepts `-e oneCoreOnly true` to check PCM from 
 
 ```sh
 ./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest -PsandroidAbis=armeabi-v7a
-adb install -r AndroidApp/build/outputs/apk/debug/androidApp-debug.apk
+adb install -r AndroidApp/build/outputs/apk/debug/androidApp-universal-debug.apk
 adb install -r AndroidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
 adb shell am instrument -w -e oneCoreOnly true com.quinton.sandroid.test/com.quinton.sandroid.NaturalVoiceInstrumentation
 ```
 
-If you have the supported Sapple Mac app, its resource folders can supply `VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and `NeuralVoices`. Look inside `Contents/PlugIns/ClassicVoicesExtension.appex/Contents/Resources/`. Copy each entire folder to the repository root, including `NeuralVoices/model.key`; natural voices also need the shared files in `OneCoreVoice`. Gradle downloads the Android SDK from Maven Central and packages its core, embedded TTS, TTS runtime, and ONNX runtime libraries. The Java/cloud API and telemetry library are not packaged, and the app has no internet permission. The Mac SDK dylibs are not used on Android.
+If you have the supported Sapple Mac app, its resource folders can supply `VoiceData`, `SAPI4Voices`, `AnnaVoice`, `OneCoreVoice`, and `NeuralVoices`. Look inside `Contents/PlugIns/ClassicVoicesExtension.appex/Contents/Resources/`. Copy each entire folder to the repository root, including `NeuralVoices/model.key`; natural voices also need the shared files in `OneCoreVoice`. Stage the developer-supplied Android Speech SDK 1.50 libraries under `NeuralSDK/android/<abi>/`. Gradle copies them into the application; this directory and all SDK binaries are gitignored. If that folder is absent, Gradle downloads SDK 1.50.0 from Maven and extracts its offline native libraries automatically. An explicit `-PembeddedSpeechVersion=1.50.0` overrides a locally staged SDK. The app has no internet permission. The Mac SDK dylibs are not used on Android.
 
 TruVoice's tables are embedded in the Mac executables rather than a resource folder. With `Sapple.app` copied into the repository, recover them using `python3 tools/truvoice_from_sapple.py Sapple.app`, then rebuild the APK. This script requires matching table bytes and symbol offsets in the app and extension and rejects unsupported data images. The recovered assembly preserves the data layout but has different text from the upstream assembly checked by `make truvoice-data`. The copied app and recovered voice data are gitignored.
 
-The natural-voice build passed tests on an Android 15 ARM64 emulator with 4 KB memory pages: all seven voices produced nonzero PCM, canceled speech and spoke again, and Android's TTS service registered the voices as offline and synthesized a WAV. Physical Pixel testing is still required. SDK 1.33's libraries have 4 KB ELF alignment and do not provide native 16 KB page-size support. Our own native library is aligned for 16 KB pages. SDK 1.44.0 and 1.52.0 have newer page-size support but canceled synthesis with these models in emulator tests; changing SDK versions is not a verified fix for these voice packages. An alternative SDK can be selected for experiments with `-PembeddedSpeechVersion=1.52.0`.
+The merged SDK 1.50 implementation passed an Android 15 ARM64 emulator test with all seven staged Windows natural voices: nonzero PCM, cancellation, recovery, offline registration and system TTS WAV synthesis. Jane and Sara remain untested here because their packs were not staged. Run the instrumentation below with your locally staged models and SDK. Use `adb shell getconf PAGE_SIZE` to check device page size; Sandroid’s own native library is aligned for 16 KB pages, and third-party SDK compatibility must be checked separately.
 
 To repeat the natural-voice smoke test on a connected test device:
 
 ```sh
 ./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest
-adb install -r AndroidApp/build/outputs/apk/debug/androidApp-debug.apk
+adb install -r AndroidApp/build/outputs/apk/debug/androidApp-universal-debug.apk
 adb install -r AndroidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
 adb shell am instrument -w com.quinton.sandroid.test/com.quinton.sandroid.NaturalVoiceInstrumentation
 ```
@@ -187,7 +189,13 @@ tools/        data staging, hash checks, table and patch generators
 - David, Zira, Mark, Hazel, George and Susan (OneCore): engine from [ms-david-zira-decomp](https://github.com/KamiKitsune420/ms-david-zira-decomp) by KamiKitsune420, plus Eva, Sarah, Matilda, and the Australian and Canadian voices Catherine, James, Linda and Richard, which I added. Voice data by Microsoft.
 - Jenny, Aria, Guy, Sonia and Ryan (Windows 11 natural voices), and Neerja and Prabhat (Indian English natural voices): these run on Microsoft's embedded Speech SDK. Voices and SDK by Microsoft.
 
+- Jane and Sara (Azure embedded neural voices): Microsoft's offline embedded voice packs, each with its own license.
+
 None of the voice data, original engine files or SDKs are in this repo, and this project doesn't license them. They belong to their owners. The pre-built downloads on quintonwilliams.me do bundle them, for personal use, and they will be removed if a rights holder asks.
+
+## Thanks
+
+Thanks to Zach Benton for his contribution to this project.
 
 ## License
 

@@ -47,7 +47,7 @@ build_apk() {
     [[ -n "$task_version" ]] || { echo "Cannot read versionName" >&2; exit 1; }
     task_output="build/Sandroid-${task_version}-${task_target}.apk"
     mkdir -p build
-    cp AndroidApp/build/outputs/apk/debug/androidApp-debug.apk "$task_output"
+    cp AndroidApp/build/outputs/apk/debug/androidApp-universal-debug.apk "$task_output"
     echo "Built: $task_root/$task_output"
 }
 

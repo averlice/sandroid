@@ -46,7 +46,7 @@ internal class ScrollingChecks(private val instrumentation: Instrumentation) {
         repeat(30) {
             val nodes = currentNodes()
             val list = nodes.singleOrNull { it.className == "android.widget.ListView" }
-            checkNotNull(list) { "Voice dialog list is missing" }
+            checkNotNull(list) { "Voice dialog list is missing while choosing $name: ${nodes.joinToString { "${it.className}: ${it.text}" }}" }
             nodes.firstOrNull { it.text?.toString() == name && it.isVisibleToUser }?.let { row ->
                 check(row.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "Cannot select $name" }
                 instrumentation.waitForIdleSync()
