@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light theme; values-night/themes.xml supplies the dark twin when the system is in dark mode. -->
+    <style name="Theme.Sandroid" parent="@android:style/Theme.Material.Light.NoActionBar" />
+</resources>
