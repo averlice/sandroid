@@ -21,8 +21,8 @@ android {
         minSdk = 26
         targetSdk = 35
         ndkVersion = "27.2.12479018"
-        versionCode = 12
-        versionName = "0.3.2"
+        versionCode = 13
+        versionName = "0.4.0"
         testInstrumentationRunner = "com.quinton.sandroid.NaturalVoiceInstrumentation"
         ndk { abiFilters += selectedAbis }
     }
