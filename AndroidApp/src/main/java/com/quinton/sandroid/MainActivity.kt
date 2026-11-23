@@ -43,7 +43,7 @@ class MainActivity : Activity() {
     private var voiceList: List<VoiceDef> = VoiceCatalog.voices
     private var availableVoices: List<VoiceDef> = emptyList()
     private val voiceSelections = mutableMapOf<Engine, String>()
-    private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+    private val prefs by lazy { DeviceStorage.prefs(this, "settings") }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

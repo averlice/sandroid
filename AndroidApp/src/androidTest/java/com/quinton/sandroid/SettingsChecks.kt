@@ -16,7 +16,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 internal class SettingsChecks(private val instrumentation: Instrumentation) {
-    private val context = instrumentation.targetContext
+    // The engine is direct boot aware and keeps its settings device-protected, so the checks
+    // must run there too; a credential-encrypted context is unusable before the first unlock.
+    private val context = instrumentation.targetContext.createDeviceProtectedStorageContext()
 
     fun run() {
         val original = shortArrayOf(-32768, -20000, -1000, 0, 1000, 20000, 32767)

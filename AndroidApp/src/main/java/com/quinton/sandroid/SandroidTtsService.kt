@@ -33,7 +33,7 @@ class SandroidTtsService : TextToSpeechService() {
 
     /** The voice picked in the Sandroid app (its settings screen), applied engine-wide. */
     private fun preferredVoice(): VoiceDef? {
-        val id = getSharedPreferences("settings", MODE_PRIVATE).getString("voice", null) ?: return null
+        val id = DeviceStorage.prefs(this, "settings").getString("voice", null) ?: return null
         val voice = VoiceCatalog.byNameOrLocale(id) ?: return null
         return if (voice in voices) voice else null
     }
@@ -102,10 +102,10 @@ class SandroidTtsService : TextToSpeechService() {
             }
             val rate = request.speechRate.coerceIn(10, 400) / 100.0
             val sapiRate = (10.0 * ln(rate) / ln(3.0)).coerceIn(-10.0, 18.0)
-            val prefPitch = getSharedPreferences("settings", MODE_PRIVATE).getInt("pitch", 0).toDouble()
+            val prefPitch = DeviceStorage.prefs(this, "settings").getInt("pitch", 0).toDouble()
             val pitch = (12.0 * log2(request.pitch.coerceIn(10, 400) / 100.0) + prefPitch).coerceIn(-12.0, 12.0)
-            val singing = getSharedPreferences("settings", MODE_PRIVATE).getBoolean("singing", false)
-            val volume = getSharedPreferences("settings", MODE_PRIVATE)
+            val singing = DeviceStorage.prefs(this, "settings").getBoolean("singing", false)
+            val volume = DeviceStorage.prefs(this, "settings")
                 .getInt(PcmVolume.KEY, PcmVolume.DEFAULT_PERCENT)
             SpeechDiagnostics.record(this, "TTS synthesizing ${selected.name}")
             val rc = NativeEngine.speak(handle, request.charSequenceText.toString(), sapiRate, pitch, singing,

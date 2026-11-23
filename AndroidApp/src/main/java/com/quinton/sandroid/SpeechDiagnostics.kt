@@ -9,7 +9,7 @@ import android.os.Process
 /** Device-local report for a remote tester; collecting it does not send anything. */
 internal object SpeechDiagnostics {
     fun record(context: Context, operation: String) {
-        context.getSharedPreferences("speech-diagnostics", Context.MODE_PRIVATE).edit()
+        DeviceStorage.prefs(context, "speech-diagnostics").edit()
             .putString("last-operation", "${java.util.Date()}: $operation").commit()
     }
 
@@ -21,8 +21,9 @@ internal object SpeechDiagnostics {
         appendLine("Process: ${if (Process.is64Bit()) 64 else 32}-bit")
         appendLine("Device ABIs: ${Build.SUPPORTED_ABIS.joinToString()}")
         appendLine("Native libraries: ${context.applicationInfo.nativeLibraryDir}")
-        appendLine("Last operation: " + context.getSharedPreferences("speech-diagnostics", Context.MODE_PRIVATE)
-            .getString("last-operation", "None recorded"))
+        val last = DeviceStorage.prefs(context, "speech-diagnostics")
+            .getString("last-operation", "None recorded")
+        appendLine("Last operation: $last")
         val manager = context.getSystemService(ActivityManager::class.java)
         val memory = ActivityManager.MemoryInfo()
         manager.getMemoryInfo(memory)

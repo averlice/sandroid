@@ -19,7 +19,7 @@ internal object NativeEngine {
             return nativeOpenNeural(
                 context.applicationInfo.nativeLibraryDir,
                 dataRoot.absolutePath,
-                File(context.cacheDir, "neural-work").absolutePath,
+                File(DeviceStorage.context(context).cacheDir, "neural-work").absolutePath,
                 voice.dataName
             )
         }
