@@ -39,9 +39,16 @@ internal object VoiceAssets {
         }.getOrDefault(false)
     }
 
+    /**
+     * The voice data goes to device-protected storage, because the engine answers the system
+     * during boot, before the user's first unlock, while credential-encrypted storage does not
+     * exist yet. The files are Microsoft's voice models, not the user's, so they need no
+     * encryption at rest.
+     */
     @Synchronized
     fun install(context: Context): File {
-        val root = File(context.filesDir, "voice-data")
+        val storage = context.createDeviceProtectedStorageContext()
+        val root = File(storage.filesDir, "voice-data")
         if (verifiedRoot == root && root.isDirectory) return root
         check(root.isDirectory || root.mkdirs()) { "Cannot create voice-data folder" }
         val entries = context.assets.open("voice-assets.sha256").bufferedReader().use { it.readLines() }
@@ -65,6 +72,10 @@ internal object VoiceAssets {
             if (!valid) installFile(context, path, target, size, hash)
         }
         verifiedRoot = root
+        // Builds before direct boot support kept the same files encrypted at rest; drop that
+        // copy once the device-protected one is complete, or it doubles the ~295 MB.
+        val previous = File(context.filesDir, "voice-data")
+        if (previous.absolutePath != root.absolutePath) runCatching { previous.deleteRecursively() }
         return root
     }
 
